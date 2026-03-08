@@ -24,7 +24,8 @@ function getModel(): ReturnType<GoogleGenerativeAI["getGenerativeModel"]> {
     return cachedModel;
   }
 
-  const genAI = new GoogleGenerativeAI(requiredEnv("GEMINI_API_KEY"));
+  const rawKey = requiredEnv("GEMINI_API_KEY");
+  const genAI = new GoogleGenerativeAI(rawKey.trim());
   cachedModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
   return cachedModel;
 }
