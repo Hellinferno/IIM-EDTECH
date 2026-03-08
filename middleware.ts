@@ -12,7 +12,12 @@ import { NextResponse } from 'next/server';
 export default clerkMiddleware(async (auth, req) => {
     if (!isPublicRoute(req)) {
         const authObject = await auth();
+        console.log("Middleware auth for", req.nextUrl.pathname, "userId:", authObject.userId);
+
         if (!authObject.userId) {
+            if (req.nextUrl.pathname.startsWith('/api/')) {
+                return new NextResponse('Unauthorized', { status: 401 });
+            }
             return NextResponse.redirect(new URL('/sign-in', req.url));
         }
     }

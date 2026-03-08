@@ -51,6 +51,12 @@ export default function SendImagePage(): JSX.Element {
         body: formData
       });
 
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error("API Route failed:", response.status, errText);
+        throw new Error(`API Error: ${response.status} ${errText}`);
+      }
+
       let fullText = "";
       await consumeSSE(response, (data) => {
         if (data === "[DONE]") {
@@ -67,9 +73,9 @@ export default function SendImagePage(): JSX.Element {
       appendAssistantMessage(fullText);
       setAnalysisStreamingText("");
       setAnalysisDone(true);
-    } catch {
+    } catch (e: any) {
       setAnalysisStreamingText("");
-      setError("Image processing failed. Please try a clearer image.");
+      setError(`Crash: ${e.message || String(e)}`);
     } finally {
       setIsAnalyzing(false);
     }

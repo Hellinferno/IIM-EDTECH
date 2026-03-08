@@ -27,7 +27,8 @@ export function sseResponse(
     async start(controller) {
       try {
         await streamFactory(controller);
-      } catch {
+      } catch (e) {
+        console.error("SSE Stream Error:", e);
         controller.enqueue(encoder.encode("data: [ERROR]\n\n"));
       } finally {
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));

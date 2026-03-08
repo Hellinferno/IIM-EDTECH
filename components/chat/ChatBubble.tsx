@@ -1,4 +1,8 @@
 import type { Message } from "@/types";
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 
 interface ChatBubbleProps {
   message: Message;
@@ -10,13 +14,22 @@ export function ChatBubble({ message }: ChatBubbleProps): JSX.Element {
     <div className={`flex w-full ${isUser ? "justify-end" : "justify-start"}`}>
       <div
         className={[
-          "max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm leading-relaxed",
+          "max-w-[85%] rounded-lg px-4 py-3 text-sm leading-relaxed overflow-x-auto",
           isUser
-            ? "bg-foreground text-background"
-            : "border border-border bg-background text-foreground"
+            ? "bg-foreground text-background whitespace-pre-wrap"
+            : "border border-border bg-background text-foreground prose prose-sm dark:prose-invert"
         ].join(" ")}
       >
-        {message.content}
+        {isUser ? (
+          message.content
+        ) : (
+          <ReactMarkdown
+            remarkPlugins={[remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+          >
+            {message.content}
+          </ReactMarkdown>
+        )}
       </div>
     </div>
   );

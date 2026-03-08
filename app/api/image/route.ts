@@ -27,8 +27,9 @@ export async function POST(request: Request): Promise<Response> {
   let formData: FormData;
   try {
     formData = await request.formData();
-  } catch {
-    return Response.json({ error: "Invalid form data" }, { status: 400 });
+  } catch (e: any) {
+    console.error("FormData Error:", e);
+    return Response.json({ error: "Invalid form data", msg: e?.message || String(e) }, { status: 400 });
   }
 
   const file = formData.get("image");
