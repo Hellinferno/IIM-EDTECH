@@ -17,11 +17,21 @@ function stripDataUrlPrefix(input: string): string {
   return input.slice(commaIndex + 1);
 }
 
-function getModel(systemInstruction?: string): ReturnType<GoogleGenerativeAI["getGenerativeModel"]> {
+/** Max conversation turns (user+assistant pairs) sent as history to save tokens. */
+const MAX_HISTORY_TURNS = 6;
+
+function getModel(
+  systemInstruction?: string,
+  maxOutputTokens = 1024
+): ReturnType<GoogleGenerativeAI["getGenerativeModel"]> {
   const rawKey = requiredEnv("GEMINI_API_KEY");
   const genAI = new GoogleGenerativeAI(rawKey.trim());
   return genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
+    generationConfig: {
+      maxOutputTokens,
+      temperature: 0.4
+    },
     ...(systemInstruction && {
       systemInstruction: {
         role: "user" as const,
@@ -31,8 +41,16 @@ function getModel(systemInstruction?: string): ReturnType<GoogleGenerativeAI["ge
   });
 }
 
+/** Keep only the last N user+assistant turns to cap input tokens. */
+function trimHistory(messages: Message[], maxTurns: number): Message[] {
+  if (messages.length <= maxTurns * 2) {
+    return messages;
+  }
+  return messages.slice(-maxTurns * 2);
+}
+
 export async function extractTextFromFrame(base64: string): Promise<string> {
-  const model = getModel();
+  const model = getModel(undefined, 512);
   const cleanBase64 = stripDataUrlPrefix(base64);
   const result = await model.generateContent([
     {
@@ -41,7 +59,7 @@ export async function extractTextFromFrame(base64: string): Promise<string> {
         data: cleanBase64
       }
     },
-    "Extract only visible text from this image. Return plain text only."
+    "Return ONLY the visible text from this image, nothing else."
   ]);
 
   return result.response.text().trim();
@@ -54,21 +72,24 @@ function toGeminiRole(role: Message["role"]): "user" | "model" {
 export async function* streamChat(
   messages: Message[],
   systemPrompt: string,
-  image?: ImageInput
+  image?: ImageInput,
+  maxOutputTokens = 1024
 ): AsyncGenerator<string> {
-  const model = getModel(systemPrompt);
+  const model = getModel(systemPrompt, maxOutputTokens);
   if (messages.length === 0) {
     return;
   }
 
+  const trimmed = trimHistory(messages, MAX_HISTORY_TURNS);
+
   const chat = model.startChat({
-    history: messages.slice(0, -1).map((message) => ({
+    history: trimmed.slice(0, -1).map((message) => ({
       role: toGeminiRole(message.role),
       parts: [{ text: message.content }]
     }))
   });
 
-  const latest = messages[messages.length - 1];
+  const latest = trimmed[trimmed.length - 1];
   const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
 
   if (image) {

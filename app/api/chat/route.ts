@@ -44,9 +44,19 @@ function enrichLiveOCR(messages: Message[], ocrText: string): Message[] {
 
   const enrichedLastMessage: Message = {
     ...latest,
-    content: `OCR_CONTEXT:\n${ocrText}\n\nSTUDENT_MESSAGE:\n${latest.content}`
+    content: `[OCR] ${ocrText}\n${latest.content}`
   };
   return [...messages.slice(0, -1), enrichedLastMessage];
+}
+
+/** Strip metadata (id, createdAt) — Gemini only needs role + content. */
+function stripMetadata(messages: Message[]): Message[] {
+  return messages.map(({ role, content }) => ({
+    id: "",
+    role,
+    content,
+    createdAt: 0
+  }));
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -78,14 +88,16 @@ export async function POST(request: Request): Promise<Response> {
 
   const ocrText = typeof payload.ocrText === "string" ? payload.ocrText.trim() : "";
   const image = normalizeImage(payload.image);
-  const baseMessages =
+  const enriched =
     mode === "live_ocr" && ocrText ? enrichLiveOCR(payload.messages, ocrText) : payload.messages;
+  const baseMessages = stripMetadata(enriched);
   const systemPrompt = mode === "live_ocr" ? LIVE_OCR_SYSTEM_PROMPT : SEND_IMAGE_SYSTEM_PROMPT;
+  const maxTokens = mode === "live_ocr" ? 512 : 1024;
 
   return sseResponse(async (controller) => {
     const encoder = new TextEncoder();
     let hasTokens = false;
-    for await (const token of streamChat(baseMessages, systemPrompt, image)) {
+    for await (const token of streamChat(baseMessages, systemPrompt, image, maxTokens)) {
       hasTokens = true;
       controller.enqueue(encoder.encode(`data: ${JSON.stringify(token)}\n\n`));
     }

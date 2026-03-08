@@ -59,10 +59,10 @@ export async function POST(request: Request): Promise<Response> {
 
   const messages: Message[] = [
     {
-      id: `img-${Date.now()}`,
+      id: "",
       role: "user",
-      content: "Please solve the problem shown in this image step by step.",
-      createdAt: Date.now()
+      content: "Solve this step by step.",
+      createdAt: 0
     }
   ];
 
