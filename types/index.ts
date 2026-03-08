@@ -1,0 +1,14 @@
+export type ChatRole = "user" | "assistant";
+export type AppMode = "live_ocr" | "send_image";
+
+export interface Message {
+  id: string;
+  role: ChatRole;
+  content: string;
+  createdAt: number;
+}
+
+export interface ImageInput {
+  base64: string;
+  mimeType: string;
+}
