@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { extractTextFromFrame } from "@/lib/gemini";
+import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 
 interface OCRRequestBody {
   image?: unknown;
@@ -9,6 +10,11 @@ export async function POST(request: Request): Promise<Response> {
   const { userId } = await auth();
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const rl = rateLimit(rateLimitKey(userId, "ocr"), { maxRequests: 30, windowMs: 60_000 });
+  if (!rl.success) {
+    return rateLimitResponse(rl.resetMs);
   }
 
   let payload: OCRRequestBody;

@@ -3,6 +3,7 @@ import { LIVE_OCR_SYSTEM_PROMPT } from "@/lib/prompts/live-ocr";
 import { SEND_IMAGE_SYSTEM_PROMPT } from "@/lib/prompts/send-image";
 import { isValidMessageList, sseResponse } from "@/lib/api";
 import { streamChat } from "@/lib/gemini";
+import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 import type { AppMode, ImageInput, Message } from "@/types";
 
 interface ChatRequestBody {
@@ -63,6 +64,11 @@ export async function POST(request: Request): Promise<Response> {
   const { userId } = await auth();
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const rl = rateLimit(rateLimitKey(userId, "chat"), { maxRequests: 20, windowMs: 60_000 });
+  if (!rl.success) {
+    return rateLimitResponse(rl.resetMs);
   }
 
   let payload: ChatRequestBody;
