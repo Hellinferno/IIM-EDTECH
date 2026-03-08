@@ -76,25 +76,38 @@ export function useChat(initialMessages: Message[] = []): UseChatResult {
         })
       });
 
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error("Chat API failed:", response.status, errText);
+        throw new Error(`API Error: ${response.status} ${errText}`);
+      }
+
       let fullText = "";
       await consumeSSE(response, (data) => {
         if (data === "[DONE]") {
           return;
         }
-        if (data === "[ERROR]") {
-          throw new Error("Streaming error");
+        if (data.startsWith("[ERROR]")) {
+          throw new Error(data.slice(8) || "Streaming error");
         }
-        const token = JSON.parse(data) as string;
-        fullText += token;
-        setStreamingText(fullText);
+        try {
+          const token = JSON.parse(data) as string;
+          fullText += token;
+          setStreamingText(fullText);
+        } catch {
+          // Non-JSON token, append raw
+          fullText += data;
+          setStreamingText(fullText);
+        }
       });
 
       if (fullText.trim()) {
         setMessages((current) => [...current, buildMessage("assistant", fullText.trim())]);
       }
       setStreamingText("");
-    } catch {
-      setError("Something went wrong, please try again.");
+    } catch (e: any) {
+      const msg = e.message || String(e);
+      setError(msg.startsWith("API Error") ? msg : `Something went wrong: ${msg}`);
       setStreamingText("");
     } finally {
       setIsLoading(false);

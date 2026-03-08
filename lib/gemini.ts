@@ -22,7 +22,12 @@ function getModel(systemInstruction?: string): ReturnType<GoogleGenerativeAI["ge
   const genAI = new GoogleGenerativeAI(rawKey.trim());
   return genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
-    ...(systemInstruction && { systemInstruction })
+    ...(systemInstruction && {
+      systemInstruction: {
+        role: "user" as const,
+        parts: [{ text: systemInstruction }]
+      }
+    })
   });
 }
 
@@ -78,9 +83,14 @@ export async function* streamChat(
 
   const result = await chat.sendMessageStream(parts);
   for await (const chunk of result.stream) {
-    const text = chunk.text();
-    if (text) {
-      yield text;
+    try {
+      const text = chunk.text();
+      if (text) {
+        yield text;
+      }
+    } catch {
+      // Skip chunks without text (e.g. thinking/reasoning chunks)
+      continue;
     }
   }
 }

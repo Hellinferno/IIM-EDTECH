@@ -58,8 +58,9 @@ export async function POST(request: Request): Promise<Response> {
   let payload: ChatRequestBody;
   try {
     payload = (await request.json()) as ChatRequestBody;
-  } catch {
-    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  } catch (e: any) {
+    console.error("Chat API JSON Error:", e);
+    return Response.json({ error: "Invalid JSON body", details: String(e) }, { status: 400 });
   }
 
   if (!isValidMessageList(payload.messages)) {
@@ -83,8 +84,15 @@ export async function POST(request: Request): Promise<Response> {
 
   return sseResponse(async (controller) => {
     const encoder = new TextEncoder();
+    let hasTokens = false;
     for await (const token of streamChat(baseMessages, systemPrompt, image)) {
+      hasTokens = true;
       controller.enqueue(encoder.encode(`data: ${JSON.stringify(token)}\n\n`));
+    }
+    if (!hasTokens) {
+      controller.enqueue(
+        encoder.encode(`data: ${JSON.stringify("I couldn't generate a response. Please try again.")}\n\n`)
+      );
     }
   });
 }

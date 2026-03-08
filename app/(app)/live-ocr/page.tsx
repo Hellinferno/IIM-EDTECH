@@ -30,7 +30,7 @@ export default function LiveOCRPage(): JSX.Element {
   }, [captureFrame]);
 
   const { detectedText } = useOCR({
-    enabled: isActive,
+    enabled: isActive && !bootstrappedFromOCR,
     captureFrame: captureCurrentFrame,
     intervalMs: 3000
   });
