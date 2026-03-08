@@ -53,7 +53,9 @@ export async function POST(request: Request): Promise<Response> {
   const image = { base64, mimeType: file.type };
 
   // Best-effort temporary upload for prototype traceability.
+  console.log("Saving image...");
   await uploadTemporaryImage(base64, file.type, userId);
+  console.log("Image saved!");
 
   const messages: Message[] = [
     {
@@ -64,6 +66,7 @@ export async function POST(request: Request): Promise<Response> {
     }
   ];
 
+  console.log("Starting streamChat!");
   return sseResponse(async (controller) => {
     const encoder = new TextEncoder();
     for await (const token of streamChat(messages, SEND_IMAGE_SYSTEM_PROMPT, image)) {

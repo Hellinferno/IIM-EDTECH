@@ -62,8 +62,8 @@ export default function SendImagePage(): JSX.Element {
         if (data === "[DONE]") {
           return;
         }
-        if (data === "[ERROR]") {
-          throw new Error("Streaming failed");
+        if (data.startsWith("[ERROR]")) {
+          throw new Error(data.slice(8) || "Streaming failed");
         }
         const token = JSON.parse(data) as string;
         fullText += token;

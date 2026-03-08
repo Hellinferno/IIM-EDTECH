@@ -14,17 +14,9 @@ async function test() {
 
     console.log("Status:", res.status);
 
-    if (res.body) {
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            console.log(decoder.decode(value));
-        }
-    } else {
-        console.log("No body");
-    }
+    const text = await res.text();
+    fs.writeFileSync('500-error.html', text);
+    console.log("Wrote HTML to 500-error.html");
 }
 
 test();
