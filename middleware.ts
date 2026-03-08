@@ -7,8 +7,15 @@ const isPublicRoute = createRouteMatcher([
     '/api/webhooks(.*)'
 ]);
 
-export default clerkMiddleware((auth, req) => {
-    if (!isPublicRoute(req)) auth().protect();
+import { NextResponse } from 'next/server';
+
+export default clerkMiddleware(async (auth, req) => {
+    if (!isPublicRoute(req)) {
+        const authObject = await auth();
+        if (!authObject.userId) {
+            return NextResponse.redirect(new URL('/sign-in', req.url));
+        }
+    }
 });
 
 export const config = {
