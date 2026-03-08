@@ -29,10 +29,6 @@ export function sseResponse(
         await streamFactory(controller);
       } catch (e: any) {
         console.error("SSE Stream Error:", e);
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          require('fs').writeFileSync('CRASH_LOG.txt', String(e?.stack || e?.message || e));
-        } catch { }
         controller.enqueue(encoder.encode(`data: [ERROR] ${String(e?.message || e).replace(/\n/g, ' ')}\n\n`));
       } finally {
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
