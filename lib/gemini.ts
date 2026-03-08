@@ -59,7 +59,7 @@ export async function extractTextFromFrame(base64: string): Promise<string> {
         data: cleanBase64
       }
     },
-    "Return ONLY the visible text from this image, nothing else."
+    "Extract all visible text from this image. Reproduce math expressions in LaTeX (e.g. $x^2 + 3x = 0$). Return nothing else."
   ]);
 
   return result.response.text().trim();

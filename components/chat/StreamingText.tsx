@@ -1,4 +1,5 @@
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
@@ -15,7 +16,7 @@ export function StreamingText({ text }: StreamingTextProps): JSX.Element {
     <div className="flex w-full justify-start">
       <div className="max-w-[85%] border border-border bg-background px-4 py-3 text-sm leading-relaxed overflow-x-auto prose prose-sm dark:prose-invert">
         <ReactMarkdown
-          remarkPlugins={[remarkMath]}
+          remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[rehypeKatex]}
         >
           {text}
