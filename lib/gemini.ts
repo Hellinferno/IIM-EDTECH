@@ -17,17 +17,13 @@ function stripDataUrlPrefix(input: string): string {
   return input.slice(commaIndex + 1);
 }
 
-let cachedModel: ReturnType<GoogleGenerativeAI["getGenerativeModel"]> | null = null;
-
-function getModel(): ReturnType<GoogleGenerativeAI["getGenerativeModel"]> {
-  if (cachedModel) {
-    return cachedModel;
-  }
-
+function getModel(systemInstruction?: string): ReturnType<GoogleGenerativeAI["getGenerativeModel"]> {
   const rawKey = requiredEnv("GEMINI_API_KEY");
   const genAI = new GoogleGenerativeAI(rawKey.trim());
-  cachedModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-  return cachedModel;
+  return genAI.getGenerativeModel({
+    model: "gemini-2.5-flash",
+    ...(systemInstruction && { systemInstruction })
+  });
 }
 
 export async function extractTextFromFrame(base64: string): Promise<string> {
@@ -55,13 +51,12 @@ export async function* streamChat(
   systemPrompt: string,
   image?: ImageInput
 ): AsyncGenerator<string> {
-  const model = getModel();
+  const model = getModel(systemPrompt);
   if (messages.length === 0) {
     return;
   }
 
   const chat = model.startChat({
-    systemInstruction: systemPrompt,
     history: messages.slice(0, -1).map((message) => ({
       role: toGeminiRole(message.role),
       parts: [{ text: message.content }]
