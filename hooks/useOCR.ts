@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 interface UseOCRParams {
   enabled: boolean;
   captureFrame: () => string | null;
-  intervalMs?: number;
+  intervalMs?: number; // Recommended: 5000-8000ms to stay within API limits
 }
 
 interface UseOCRResult {
@@ -16,7 +16,7 @@ interface UseOCRResult {
 export function useOCR({
   enabled,
   captureFrame,
-  intervalMs = 3000
+  intervalMs = 6000  // Changed from 3000ms to 6000ms (10 calls/min instead of 20)
 }: UseOCRParams): UseOCRResult {
   const [detectedText, setDetectedText] = useState<string>("");
   const [isScanning, setIsScanning] = useState<boolean>(false);
@@ -45,6 +45,12 @@ export function useOCR({
         });
 
         if (!response.ok) {
+          if (response.status === 429) {
+            console.warn("⚠️ OCR rate limit hit - consider reducing scan frequency");
+          } else if (response.status === 500) {
+            const errorData = await response.json().catch(() => ({}));
+            console.error("OCR API error:", errorData);
+          }
           return;
         }
 
@@ -56,6 +62,8 @@ export function useOCR({
 
         previousTextRef.current = nextText;
         setDetectedText(nextText);
+      } catch (error) {
+        console.error("OCR request failed:", error);
       } finally {
         setIsScanning(false);
       }
