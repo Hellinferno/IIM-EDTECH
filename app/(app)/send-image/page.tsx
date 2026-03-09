@@ -3,10 +3,10 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { AppHeader } from "@/components/AppHeader";
-import { ChatInput } from "@/components/chat/ChatInput";
+import { ConversationPanel } from "@/components/ConversationPanel";
 import { ChatThread } from "@/components/chat/ChatThread";
 import { ImageUpload } from "@/components/image-upload/ImageUpload";
-import { useChat } from "@/hooks/useChat";
+import { useConversation } from "@/hooks/useConversation";
 import { consumeSSE } from "@/lib/sse-client";
 
 export default function SendImagePage(): JSX.Element {
@@ -16,8 +16,7 @@ export default function SendImagePage(): JSX.Element {
   const [analysisStreamingText, setAnalysisStreamingText] = useState<string>("");
   const [analysisDone, setAnalysisDone] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
-  const { messages, streamingText, isLoading, sendUserMessage, appendAssistantMessage, reset } =
-    useChat();
+  const { messages, addUserMessage, addAssistantMessage, clearHistory } = useConversation();
 
   useEffect(() => {
     if (!file) {
@@ -40,7 +39,7 @@ export default function SendImagePage(): JSX.Element {
     setIsAnalyzing(true);
     setAnalysisStreamingText("");
     setAnalysisDone(false);
-    reset();
+    clearHistory();
 
     try {
       const formData = new FormData();
@@ -70,12 +69,13 @@ export default function SendImagePage(): JSX.Element {
         setAnalysisStreamingText(fullText);
       });
 
-      appendAssistantMessage(fullText);
+      addAssistantMessage(fullText);
       setAnalysisStreamingText("");
       setAnalysisDone(true);
-    } catch (e: any) {
+    } catch (e: unknown) {
       setAnalysisStreamingText("");
-      setError(`Crash: ${e.message || String(e)}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(`Analysis failed: ${msg}`);
     } finally {
       setIsAnalyzing(false);
     }
@@ -91,6 +91,7 @@ export default function SendImagePage(): JSX.Element {
         </section>
       ) : (
         <section className="mx-auto flex h-[calc(100vh-57px)] w-full max-w-4xl flex-col px-4 py-4">
+          {/* Image preview + controls */}
           <div className="flex flex-col gap-3 border border-border p-3">
             {previewUrl ? (
               <Image
@@ -118,7 +119,7 @@ export default function SendImagePage(): JSX.Element {
                   setFile(null);
                   setError("");
                   setAnalysisDone(false);
-                  reset();
+                  clearHistory();
                 }}
                 type="button"
               >
@@ -131,7 +132,7 @@ export default function SendImagePage(): JSX.Element {
                   setFile(null);
                   setError("");
                   setAnalysisDone(false);
-                  reset();
+                  clearHistory();
                 }}
                 type="button"
               >
@@ -140,29 +141,31 @@ export default function SendImagePage(): JSX.Element {
             </div>
           </div>
 
+          {/* Solution + follow-up conversation area */}
           <div className="mt-3 flex min-h-0 flex-1 flex-col border border-border">
             {isAnalyzing && analysisStreamingText.length === 0 ? (
               <div className="p-3">
                 <div className="h-5 w-32 animate-pulse bg-muted" />
               </div>
             ) : null}
-            <ChatThread
-              isLoading={isAnalyzing || isLoading}
-              messages={messages}
-              streamingText={analysisStreamingText || streamingText}
-            />
-            {error ? <p className="px-3 pb-2 text-sm text-red-700">{error}</p> : null}
-            {analysisDone ? (
-              <ChatInput
-                disabled={isLoading}
-                onSubmit={async (text) => {
-                  await sendUserMessage(text, {
-                    mode: "send_image"
-                  });
-                }}
-                placeholder="Ask a follow-up question..."
+
+            {/* Show initial analysis streaming */}
+            {!analysisDone ? (
+              <ChatThread
+                isLoading={isAnalyzing}
+                messages={messages}
+                streamingText={analysisStreamingText}
               />
-            ) : null}
+            ) : (
+              /* After analysis done, switch to ConversationPanel with voice for follow-ups */
+              <ConversationPanel
+                messages={messages}
+                onAddUserMessage={addUserMessage}
+                onAddAssistantMessage={addAssistantMessage}
+                mode="send_image"
+              />
+            )}
+            {error ? <p className="px-3 pb-2 text-sm text-red-700">{error}</p> : null}
           </div>
         </section>
       )}

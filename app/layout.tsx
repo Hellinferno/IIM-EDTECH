@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider, SignInButton, SignUpButton, SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -25,6 +27,7 @@ export default function RootLayout({ children }: RootLayoutProps): JSX.Element {
       </head>
       <body>
         <ClerkProvider>
+          <OfflineBanner />
           <header>
             <SignedOut>
               <SignInButton />
@@ -34,7 +37,9 @@ export default function RootLayout({ children }: RootLayoutProps): JSX.Element {
               <UserButton />
             </SignedIn>
           </header>
-          {children}
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
         </ClerkProvider>
       </body>
     </html>

@@ -27,7 +27,7 @@ function getModel(
   const rawKey = requiredEnv("GEMINI_API_KEY");
   const genAI = new GoogleGenerativeAI(rawKey.trim());
   return genAI.getGenerativeModel({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.0-flash",
     generationConfig: {
       maxOutputTokens,
       temperature: 0.4

@@ -3,10 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AppHeader } from "@/components/AppHeader";
-import { ChatInput } from "@/components/chat/ChatInput";
-import { ChatThread } from "@/components/chat/ChatThread";
+import { ConversationPanel } from "@/components/ConversationPanel";
 import { useCamera } from "@/hooks/useCamera";
-import { useChat } from "@/hooks/useChat";
+import { useConversation } from "@/hooks/useConversation";
 import { useOCR } from "@/hooks/useOCR";
 
 function truncate(text: string, maxLength: number): string {
@@ -20,7 +19,7 @@ export default function LiveOCRPage(): JSX.Element {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [bootstrappedFromOCR, setBootstrappedFromOCR] = useState<boolean>(false);
-  const { messages, streamingText, isLoading, error, sendUserMessage, reset } = useChat();
+  const { messages, addUserMessage, addAssistantMessage, clearHistory } = useConversation();
 
   const { isActive, permissionError, noCameraAvailable, startCamera, stopCamera, captureFrame } =
     useCamera();
@@ -43,16 +42,15 @@ export default function LiveOCRPage(): JSX.Element {
     };
   }, [startCamera, stopCamera]);
 
+  // When OCR detects text for the first time, bootstrap the conversation
   useEffect(() => {
     if (!detectedText || bootstrappedFromOCR) {
       return;
     }
     setBootstrappedFromOCR(true);
-    void sendUserMessage("Please guide me through this question.", {
-      mode: "live_ocr",
-      ocrText: detectedText
-    });
-  }, [bootstrappedFromOCR, detectedText, sendUserMessage]);
+    // Add a user message to kick off the conversation
+    addUserMessage("Please guide me through this question.");
+  }, [bootstrappedFromOCR, detectedText, addUserMessage]);
 
   if (permissionError) {
     return (
@@ -76,6 +74,7 @@ export default function LiveOCRPage(): JSX.Element {
     <main className="min-h-screen bg-background">
       <AppHeader title="Live OCR" />
       <div className="flex h-[calc(100vh-57px)] flex-col">
+        {/* Camera feed — top half */}
         <section className="relative h-1/2 border-b border-border bg-black">
           <video className="h-full w-full object-cover" muted playsInline ref={videoRef} />
           <canvas className="hidden" ref={canvasRef} />
@@ -84,12 +83,24 @@ export default function LiveOCRPage(): JSX.Element {
             onClick={() => {
               stopCamera(videoRef.current);
               setBootstrappedFromOCR(false);
-              reset();
+              clearHistory();
             }}
             type="button"
           >
             End Session
           </button>
+          {/* Snapshot blink animation */}
+          <AnimatePresence>
+            {detectedText ? (
+              <motion.div
+                animate={{ opacity: 0 }}
+                className="pointer-events-none absolute inset-0 bg-white"
+                initial={{ opacity: 0.3 }}
+                key="snapshot-blink"
+                transition={{ duration: 0.3 }}
+              />
+            ) : null}
+          </AnimatePresence>
           <div className="absolute bottom-3 left-3 right-3 min-h-14 border border-border bg-background/95 p-3 text-sm">
             <AnimatePresence mode="wait">
               <motion.p
@@ -105,15 +116,14 @@ export default function LiveOCRPage(): JSX.Element {
           </div>
         </section>
 
+        {/* Conversation panel — bottom half with voice */}
         <section className="flex min-h-0 h-1/2 flex-col">
-          <ChatThread isLoading={isLoading} messages={messages} streamingText={streamingText} />
-          {error ? <p className="px-3 pb-2 text-sm text-red-700">{error}</p> : null}
-          <ChatInput
-            disabled={isLoading}
-            onSubmit={async (text) => {
-              await sendUserMessage(text, { mode: "live_ocr", ocrText: detectedText });
-            }}
-            placeholder="Reply to your tutor..."
+          <ConversationPanel
+            messages={messages}
+            onAddUserMessage={addUserMessage}
+            onAddAssistantMessage={addAssistantMessage}
+            mode="live_ocr"
+            ocrText={detectedText}
           />
         </section>
       </div>
