@@ -23,7 +23,7 @@ const MAX_HISTORY_TURNS = 6;
 /** Models to try in order — if one hits quota, fall back to the next. */
 const MODEL_PRIORITY = [
   "gemini-2.0-flash",
-  "gemini-1.5-flash",
+  "gemini-2.0-flash-lite",
 ] as const;
 
 /** Custom error class for quota exhaustion so callers can distinguish it. */
