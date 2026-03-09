@@ -2,7 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { LIVE_OCR_SYSTEM_PROMPT } from "@/lib/prompts/live-ocr";
 import { SEND_IMAGE_SYSTEM_PROMPT } from "@/lib/prompts/send-image";
 import { isValidMessageList, sseResponse } from "@/lib/api";
-import { streamChat } from "@/lib/gemini";
+import { streamChat, QuotaExhaustedError } from "@/lib/gemini";
 import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 import type { AppMode, ImageInput, Message } from "@/types";
 
@@ -103,14 +103,24 @@ export async function POST(request: Request): Promise<Response> {
   return sseResponse(async (controller) => {
     const encoder = new TextEncoder();
     let hasTokens = false;
-    for await (const token of streamChat(baseMessages, systemPrompt, image, maxTokens)) {
-      hasTokens = true;
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify(token)}\n\n`));
-    }
-    if (!hasTokens) {
-      controller.enqueue(
-        encoder.encode(`data: ${JSON.stringify("I couldn't generate a response. Please try again.")}\n\n`)
-      );
+    try {
+      for await (const token of streamChat(baseMessages, systemPrompt, image, maxTokens)) {
+        hasTokens = true;
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(token)}\n\n`));
+      }
+      if (!hasTokens) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify("I couldn't generate a response. Please try again.")}\n\n`)
+        );
+      }
+    } catch (error) {
+      if (error instanceof QuotaExhaustedError || (error instanceof Error && (error.message.includes("429") || error.message.includes("quota")))) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify("⚠️ API quota exhausted. The free tier daily limit has been reached. Please wait for it to reset (resets daily) or generate a new API key from a new Google Cloud project at aistudio.google.com.")}\n\n`)
+        );
+      } else {
+        throw error;
+      }
     }
   });
 }

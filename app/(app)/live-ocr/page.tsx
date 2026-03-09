@@ -28,10 +28,10 @@ export default function LiveOCRPage(): JSX.Element {
     return captureFrame(videoRef.current, canvasRef.current);
   }, [captureFrame]);
 
-  const { detectedText } = useOCR({
+  const { detectedText, quotaExhausted } = useOCR({
     enabled: isActive && !bootstrappedFromOCR,
     captureFrame: captureCurrentFrame,
-    intervalMs: 3000
+    intervalMs: 6000
   });
 
   useEffect(() => {
@@ -110,7 +110,7 @@ export default function LiveOCRPage(): JSX.Element {
                 key={detectedText || "ocr-hint"}
                 transition={{ duration: 0.2, ease: "easeOut" }}
               >
-                {detectedText ? truncate(detectedText, 200) : "Point camera at text to begin"}
+                {detectedText ? truncate(detectedText, 200) : quotaExhausted ? "⚠️ API quota exhausted — scanning paused. Please wait or use a new API key." : "Point camera at text to begin"}
               </motion.p>
             </AnimatePresence>
           </div>

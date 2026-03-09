@@ -5,28 +5,35 @@ import { useEffect, useRef, useState } from "react";
 interface UseOCRParams {
   enabled: boolean;
   captureFrame: () => string | null;
-  intervalMs?: number; // Recommended: 5000-8000ms to stay within API limits
+  intervalMs?: number;
 }
 
 interface UseOCRResult {
   detectedText: string;
   isScanning: boolean;
+  quotaExhausted: boolean;
 }
 
 export function useOCR({
   enabled,
   captureFrame,
-  intervalMs = 6000  // Changed from 3000ms to 6000ms (10 calls/min instead of 20)
+  intervalMs = 6000
 }: UseOCRParams): UseOCRResult {
   const [detectedText, setDetectedText] = useState<string>("");
   const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [quotaExhausted, setQuotaExhausted] = useState<boolean>(false);
   const previousTextRef = useRef<string>("");
+  const consecutiveFailsRef = useRef<number>(0);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || quotaExhausted) {
       setIsScanning(false);
-      setDetectedText("");
-      previousTextRef.current = "";
+      if (!enabled) {
+        setDetectedText("");
+        previousTextRef.current = "";
+        setQuotaExhausted(false);
+        consecutiveFailsRef.current = 0;
+      }
       return;
     }
 
@@ -46,14 +53,22 @@ export function useOCR({
 
         if (!response.ok) {
           if (response.status === 429) {
-            console.warn("⚠️ OCR rate limit hit - consider reducing scan frequency");
-          } else if (response.status === 500) {
-            const errorData = await response.json().catch(() => ({}));
-            console.error("OCR API error:", errorData);
+            const data = await response.json().catch(() => ({}));
+            if (data.error === "quota_exhausted") {
+              console.warn("API quota exhausted — pausing OCR scanning");
+              setQuotaExhausted(true);
+              return;
+            }
+            consecutiveFailsRef.current++;
+            if (consecutiveFailsRef.current >= 3) {
+              console.warn("Multiple rate limit hits — pausing OCR scanning");
+              setQuotaExhausted(true);
+            }
           }
           return;
         }
 
+        consecutiveFailsRef.current = 0;
         const payload = (await response.json()) as { text?: string };
         const nextText = (payload.text ?? "").trim();
         if (!nextText || nextText === previousTextRef.current) {
@@ -73,7 +88,7 @@ export function useOCR({
       window.clearInterval(interval);
       setIsScanning(false);
     };
-  }, [enabled, captureFrame, intervalMs]);
+  }, [enabled, captureFrame, intervalMs, quotaExhausted]);
 
-  return { detectedText, isScanning };
+  return { detectedText, isScanning, quotaExhausted };
 }

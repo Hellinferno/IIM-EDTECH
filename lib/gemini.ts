@@ -20,14 +20,33 @@ function stripDataUrlPrefix(input: string): string {
 /** Max conversation turns (user+assistant pairs) sent as history to save tokens. */
 const MAX_HISTORY_TURNS = 6;
 
+/** Models to try in order — if one hits quota, fall back to the next. */
+const MODEL_PRIORITY = [
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+] as const;
+
+/** Custom error class for quota exhaustion so callers can distinguish it. */
+export class QuotaExhaustedError extends Error {
+  constructor(model: string, detail?: string) {
+    super(`Gemini API quota exhausted for ${model}. ${detail ?? "Please wait or use a new API key."}`);
+    this.name = "QuotaExhaustedError";
+  }
+}
+
+function createGenAI(): GoogleGenerativeAI {
+  const rawKey = requiredEnv("GEMINI_API_KEY");
+  return new GoogleGenerativeAI(rawKey.trim());
+}
+
 function getModel(
+  modelName: string,
   systemInstruction?: string,
   maxOutputTokens = 1024
 ): ReturnType<GoogleGenerativeAI["getGenerativeModel"]> {
-  const rawKey = requiredEnv("GEMINI_API_KEY");
-  const genAI = new GoogleGenerativeAI(rawKey.trim());
+  const genAI = createGenAI();
   return genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
+    model: modelName,
     generationConfig: {
       maxOutputTokens,
       temperature: 0.4
@@ -41,6 +60,47 @@ function getModel(
   });
 }
 
+/** Check if an error is a 429 quota error. */
+function isQuotaError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const msg = error.message;
+  return msg.includes("429") || msg.includes("quota") || msg.includes("Too Many Requests");
+}
+
+/** Sleep for given ms. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Retry a function with exponential backoff on 429 errors.
+ *  Only retries transient per-minute limits — daily exhaustion is thrown immediately. */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 2,
+  baseDelayMs = 2000
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (!isQuotaError(error)) throw error;
+
+      // If the error says limit: 0 (daily exhausted), don't retry — it won't help.
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes("limit: 0")) throw error;
+
+      if (attempt < maxRetries) {
+        const delay = baseDelayMs * Math.pow(2, attempt);
+        console.warn(`Gemini 429 — retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+        await sleep(delay);
+      }
+    }
+  }
+  throw lastError;
+}
+
 /** Keep only the last N user+assistant turns to cap input tokens. */
 function trimHistory(messages: Message[], maxTurns: number): Message[] {
   if (messages.length <= maxTurns * 2) {
@@ -50,19 +110,33 @@ function trimHistory(messages: Message[], maxTurns: number): Message[] {
 }
 
 export async function extractTextFromFrame(base64: string): Promise<string> {
-  const model = getModel(undefined, 512);
   const cleanBase64 = stripDataUrlPrefix(base64);
-  const result = await model.generateContent([
+  const content = [
     {
       inlineData: {
-        mimeType: "image/jpeg",
+        mimeType: "image/jpeg" as const,
         data: cleanBase64
       }
     },
     "Extract all visible text from this image. Reproduce math expressions in LaTeX (e.g. $x^2 + 3x = 0$). Return nothing else."
-  ]);
+  ];
 
-  return result.response.text().trim();
+  // Try each model in priority order; fall back on quota errors.
+  for (const modelName of MODEL_PRIORITY) {
+    try {
+      const model = getModel(modelName, undefined, 512);
+      const result = await withRetry(() => model.generateContent(content));
+      return result.response.text().trim();
+    } catch (error) {
+      if (isQuotaError(error)) {
+        console.warn(`Model ${modelName} quota hit, trying next fallback...`);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new QuotaExhaustedError("all models", "All Gemini models have hit their quota limits. Please wait for quota reset or use a new API key.");
 }
 
 function toGeminiRole(role: Message["role"]): "user" | "model" {
@@ -75,19 +149,16 @@ export async function* streamChat(
   image?: ImageInput,
   maxOutputTokens = 1024
 ): AsyncGenerator<string> {
-  const model = getModel(systemPrompt, maxOutputTokens);
   if (messages.length === 0) {
     return;
   }
 
   const trimmed = trimHistory(messages, MAX_HISTORY_TURNS);
 
-  const chat = model.startChat({
-    history: trimmed.slice(0, -1).map((message) => ({
-      role: toGeminiRole(message.role),
-      parts: [{ text: message.content }]
-    }))
-  });
+  const historyParts = trimmed.slice(0, -1).map((message) => ({
+    role: toGeminiRole(message.role),
+    parts: [{ text: message.content }]
+  }));
 
   const latest = trimmed[trimmed.length - 1];
   const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
@@ -102,16 +173,32 @@ export async function* streamChat(
   }
   parts.push({ text: latest.content });
 
-  const result = await chat.sendMessageStream(parts);
-  for await (const chunk of result.stream) {
+  // Try each model in priority order; fall back on quota errors.
+  for (const modelName of MODEL_PRIORITY) {
     try {
-      const text = chunk.text();
-      if (text) {
-        yield text;
+      const model = getModel(modelName, systemPrompt, maxOutputTokens);
+      const chat = model.startChat({ history: historyParts });
+      const result = await withRetry(() => chat.sendMessageStream(parts));
+
+      for await (const chunk of result.stream) {
+        try {
+          const text = chunk.text();
+          if (text) {
+            yield text;
+          }
+        } catch {
+          continue;
+        }
       }
-    } catch {
-      // Skip chunks without text (e.g. thinking/reasoning chunks)
-      continue;
+      return; // Success — exit the model loop.
+    } catch (error) {
+      if (isQuotaError(error)) {
+        console.warn(`Model ${modelName} quota hit, trying next fallback...`);
+        continue;
+      }
+      throw error;
     }
   }
+
+  throw new QuotaExhaustedError("all models", "All Gemini models have hit their quota limits. Please wait for quota reset or use a new API key.");
 }
