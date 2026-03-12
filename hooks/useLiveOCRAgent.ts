@@ -443,8 +443,15 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
           return false;
         }
 
-        const errorText = await response.text();
-        setError(errorText || `OCR error: ${response.status}`);
+        try {
+          const errorJson = await response.json();
+          const niceMessage = errorJson.message || errorJson.error || "OCR failed";
+          const technicalDetails = errorJson.details ? ` (${errorJson.details})` : "";
+          setError(`${niceMessage}${technicalDetails}`);
+        } catch {
+          const errorText = await response.text();
+          setError(errorText || `OCR error: ${response.status}`);
+        }
         return false;
       }
 

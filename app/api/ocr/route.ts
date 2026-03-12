@@ -58,7 +58,20 @@ export async function POST(request: Request): Promise<Response> {
         { status: 429 }
       );
     }
+    
+    // Handle invalid API key or bad request explicitly
+    if (msg.includes("400") || msg.includes("API key not valid") || msg.includes("INVALID_ARGUMENT")) {
+      return Response.json(
+        { error: "configuration_error", message: "API Key invalid or permissions missing. Check Google AI Studio settings." },
+        { status: 400 }
+      );
+    }
+
     console.error("OCR processing failed:", error);
-    return Response.json({ error: "OCR processing failed" }, { status: 500 });
+    return Response.json({ 
+      error: "ocr_failed", 
+      message: "OCR processing failed", 
+      details: msg 
+    }, { status: 500 });
   }
 }
