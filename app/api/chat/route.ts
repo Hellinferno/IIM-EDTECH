@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { LIVE_OCR_SYSTEM_PROMPT } from "@/lib/prompts/live-ocr";
+import { buildLiveOCRAgentPrompt, LIVE_OCR_SYSTEM_PROMPT } from "@/lib/prompts/live-ocr";
 import { SEND_IMAGE_SYSTEM_PROMPT } from "@/lib/prompts/send-image";
 import { buildVoiceAgentPrompt } from "@/lib/prompts/voice-agent";
 import { isValidMessageList, sseResponse } from "@/lib/api";
@@ -19,7 +19,7 @@ interface ChatRequestBody {
 const CONTEXT_WINDOW = 8;
 
 function resolveMode(mode: unknown): AppMode | null {
-  if (mode === "live_ocr" || mode === "send_image" || mode === "voice_agent") {
+  if (mode === "live_ocr" || mode === "live_ocr_agent" || mode === "send_image" || mode === "voice_agent") {
     return mode;
   }
   return null;
@@ -121,7 +121,7 @@ export async function POST(request: Request): Promise<Response> {
   const ocrText = typeof payload.ocrText === "string" ? payload.ocrText.trim() : "";
   const image = normalizeImage(payload.image);
   const enriched =
-    mode === "live_ocr" && ocrText ? enrichLiveOCR(payload.messages, ocrText) : payload.messages;
+    (mode === "live_ocr" || mode === "live_ocr_agent") && ocrText ? enrichLiveOCR(payload.messages, ocrText) : payload.messages;
   const trimmedMessages = trimMessagesForCost(enriched);
   const baseMessages = stripMetadata(trimmedMessages);
 
@@ -135,6 +135,13 @@ export async function POST(request: Request): Promise<Response> {
     }
     systemPrompt = buildVoiceAgentPrompt(exam);
     maxTokens = 300; // shorter for voice
+  } else if (mode === "live_ocr_agent") {
+    const exam = resolveExam(payload.exam);
+    if (!exam) {
+      return Response.json({ error: "Invalid exam for live OCR agent mode" }, { status: 400 });
+    }
+    systemPrompt = buildLiveOCRAgentPrompt(exam);
+    maxTokens = 384;
   } else if (mode === "live_ocr") {
     systemPrompt = LIVE_OCR_SYSTEM_PROMPT;
     maxTokens = 512;

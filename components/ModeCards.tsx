@@ -16,9 +16,9 @@ export function ModeCards(): JSX.Element {
         whileTap={{ scale: 0.99 }}
       >
         <Camera className="h-6 w-6" />
-        <h2 className="text-lg font-semibold">Live OCR</h2>
+        <h2 className="text-lg font-semibold">Live OCR + Voice</h2>
         <p className="text-sm text-foreground/80">
-          Point your camera at a question and get guided tutoring in real time.
+          Keep the camera on your notebook and talk naturally while Clarity sees the page.
         </p>
         <span className="text-sm text-foreground/70 group-hover:text-foreground">Start mode</span>
       </MotionLink>
@@ -44,9 +44,9 @@ export function ModeCards(): JSX.Element {
         whileTap={{ scale: 0.99 }}
       >
         <Mic className="h-6 w-6" />
-        <h2 className="text-lg font-semibold">Voice Agent</h2>
+        <h2 className="text-lg font-semibold">Choose Exam</h2>
         <p className="text-sm text-foreground/80">
-          Have a live conversation with an AI tutor tailored to your exam.
+          Pick your exam first, then enter the combined camera and voice tutoring flow.
         </p>
         <span className="text-sm text-foreground/70 group-hover:text-foreground">Start mode</span>
       </MotionLink>

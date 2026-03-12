@@ -23,7 +23,7 @@ export default function ExamSelectPage(): JSX.Element {
   const handleSelectExam = (exam: ExamType) => {
     selectedRef.current = exam;
     const queryParam = new URLSearchParams({ exam });
-    router.push(`/voice-agent?${queryParam.toString()}`);
+    router.push(`/live-ocr?${queryParam.toString()}`);
   };
 
   return (

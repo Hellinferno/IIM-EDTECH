@@ -1,5 +1,5 @@
 export type ChatRole = "user" | "assistant";
-export type AppMode = "live_ocr" | "send_image" | "voice_agent";
+export type AppMode = "live_ocr" | "live_ocr_agent" | "send_image" | "voice_agent";
 
 export interface Message {
   id: string;
