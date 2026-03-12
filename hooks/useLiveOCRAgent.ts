@@ -437,6 +437,13 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
             retryAfterSeconds?: number;
           };
 
+          if (payload.error === "quota_exhausted") {
+            setQuotaExhausted(true);
+            setError(payload.message || "API Quota Exhausted");
+            setScanSummary("Quota Limit Reached");
+            return false;
+          }
+
           const retrySuffix = payload.retryAfterSeconds ? ` Retry in about ${payload.retryAfterSeconds} seconds.` : " Please try again in a moment.";
           setScanSummary(`OCR is busy right now.${retrySuffix}`);
           setError((payload.message ?? "OCR service is temporarily busy.") + retrySuffix);

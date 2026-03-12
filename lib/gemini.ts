@@ -24,7 +24,9 @@ const MAX_CONTEXT_MESSAGES = 8;
 const MODEL_PRIORITY = [
   "gemini-2.0-flash",
   "gemini-2.0-flash-lite",
+  "gemini-1.5-flash",
   "gemini-1.5-flash-latest",
+  "gemini-1.5-pro",
   "gemini-1.5-pro-latest",
 ] as const;
 
@@ -187,12 +189,12 @@ export async function extractTextFromFrame(base64: string): Promise<string> {
 
   if (sawTransientRateLimit) {
     throw new RateLimitedError(
-      "Gemini OCR is temporarily rate limited. Please retry in a few seconds.",
+      `Gemini OCR is temporarily rate limited (Key: ...${key.slice(-4)}). Please retry in a few seconds.`,
       lastRetryAfterSeconds
     );
   }
 
-  throw new QuotaExhaustedError("all models", "All Gemini models have hit their quota limits. Please wait for quota reset, or use a new API key and RESTART THE SERVER.");
+  throw new QuotaExhaustedError("all models", `Key ending in ...${key.slice(-4)} exhausted all models. Check usage in Google AI Studio or restart server if key was updated.`);
 }
 
 function toGeminiRole(role: Message["role"]): "user" | "model" {
@@ -205,6 +207,9 @@ export async function* streamChat(
   image?: ImageInput,
   maxOutputTokens = 1024
 ): AsyncGenerator<string> {
+  const key = process.env.GEMINI_API_KEY || "";
+  console.log(`[Gemini] Chat Request | Key: ...${key.slice(-4)}`);
+  
   if (messages.length === 0) {
     return;
   }
@@ -267,12 +272,12 @@ export async function* streamChat(
       throw error;
     }
   }
-
-  if (sawTransientRateLimit) {
-    throw new RateLimitedError(
-      "Gemini Chat is temporarily rate limited. Please retry in a few seconds.",
+`Gemini Chat is temporarily rate limited (Key: ...${key.slice(-4)}). Please retry in a few seconds.`,
       lastRetryAfterSeconds
     );
+  }
+
+  throw new QuotaExhaustedError("all models", `Key ending in ...${key.slice(-4)} exhausted all models. Check usage in Google AI Studio or restart server if key was updated.`
   }
 
   throw new QuotaExhaustedError("all models", "All Gemini models have hit their quota limits. Please wait for quota reset, or use a new API key and RESTART THE SERVER.");
