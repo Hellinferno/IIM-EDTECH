@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { Camera, Mic, ScanSearch, Send, Square } from "lucide-react";
+import { Camera, CheckCircle2, Mic, ScanSearch, Send, Square } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import { StreamingText } from "@/components/chat/StreamingText";
@@ -30,6 +30,17 @@ function truncate(text: string, maxLength: number): string {
   return `${text.slice(0, maxLength - 1)}...`;
 }
 
+function formatScanTime(value: number | null): string {
+  if (!value) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat("en-IN", {
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(value);
+}
+
 export default function LiveOCRPage(): JSX.Element {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -48,11 +59,13 @@ export default function LiveOCRPage(): JSX.Element {
     initialized,
     interrupt,
     isScanning,
+    lastScanAt,
     messages,
     microphoneAvailable,
     pageContext,
     quotaExhausted,
     scanPage,
+    scanSummary,
     startListening,
     status,
     stopListening,
@@ -83,6 +96,8 @@ export default function LiveOCRPage(): JSX.Element {
     }),
     [isActive]
   );
+  const hasDeepScan = pageContext.length > 0;
+  const formattedScanTime = formatScanTime(lastScanAt);
 
   if (hasInvalidExam) {
     return (
@@ -161,7 +176,13 @@ export default function LiveOCRPage(): JSX.Element {
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {hasDeepScan ? (
+                <div className="flex items-center gap-2 border border-emerald-300/50 bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-100 backdrop-blur-sm">
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span>Deep scan ready</span>
+                </div>
+              ) : null}
               <button
                 className="border border-white/25 bg-black/45 px-3 py-2 text-xs font-medium backdrop-blur-sm hover:bg-black/60 disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={isScanning || quotaExhausted}
@@ -191,6 +212,19 @@ export default function LiveOCRPage(): JSX.Element {
             ) : null}
           </AnimatePresence>
 
+          <AnimatePresence>
+            {scanSummary && !isScanning ? (
+              <motion.div
+                animate={{ opacity: 1, y: 0 }}
+                className="absolute left-3 top-20 max-w-sm border border-emerald-200/40 bg-emerald-500/15 px-3 py-2 text-sm text-emerald-50 backdrop-blur-sm"
+                exit={{ opacity: 0, y: -8 }}
+                initial={{ opacity: 0, y: -8 }}
+              >
+                {scanSummary}
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+
           <div className="absolute bottom-3 left-3 right-3 grid gap-3 md:grid-cols-[1.2fr_0.8fr]">
             <div className="border border-white/15 bg-black/65 p-3 text-white backdrop-blur-sm">
               <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">Current frame context</p>
@@ -199,10 +233,22 @@ export default function LiveOCRPage(): JSX.Element {
               </p>
             </div>
 
-            <div className="border border-white/15 bg-black/65 p-3 text-white backdrop-blur-sm">
+            <div
+              className={[
+                "border bg-black/65 p-3 text-white backdrop-blur-sm transition-colors",
+                hasDeepScan ? "border-emerald-300/40" : "border-white/15"
+              ].join(" ")}
+            >
               <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">Deep scan memory</p>
+              {formattedScanTime ? (
+                <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-emerald-200/80">
+                  Captured at {formattedScanTime}
+                </p>
+              ) : null}
               <p className="mt-2 text-sm leading-6 text-white/85">
-                {pageContext
+                {scanSummary && !pageContext
+                  ? scanSummary
+                  : pageContext
                   ? truncate(pageContext, 180)
                   : quotaExhausted
                     ? "OCR quota is exhausted, so deep page scans are paused for now."
@@ -312,7 +358,10 @@ export default function LiveOCRPage(): JSX.Element {
                 </button>
 
                 <button
-                  className="flex h-12 items-center gap-2 border border-border px-4 text-sm transition-colors hover:border-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  className={[
+                    "flex h-12 items-center gap-2 border px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                    hasDeepScan ? "border-emerald-400/60 bg-emerald-50 hover:border-emerald-600" : "border-border hover:border-foreground"
+                  ].join(" ")}
                   disabled={isScanning || quotaExhausted}
                   onClick={() => void scanPage()}
                   type="button"

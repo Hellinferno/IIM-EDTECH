@@ -14,11 +14,13 @@ interface UseLiveOCRAgentResult {
   error: string | null;
   initialized: boolean;
   isScanning: boolean;
+  lastScanAt: number | null;
   messages: Message[];
   microphoneAvailable: boolean;
   pageContext: string;
   quotaExhausted: boolean;
   scanPage: () => Promise<void>;
+  scanSummary: string | null;
   startListening: () => void;
   status: AgentStatus;
   stopListening: () => void;
@@ -33,6 +35,13 @@ const MIN_WORDS = 3;
 const JPEG_QUALITY = 0.72;
 const MAX_CAPTURE_WIDTH = 960;
 const MAX_CAPTURE_HEIGHT = 720;
+
+const DEEP_SCAN_PREFIX = String.raw`(?:can you\s+|could you\s+|would you\s+|please\s+)?(?:scan|read|analy[sz]e|look at)\s+(?:this|the)\s+(?:page|sheet|notebook|problem|question)`;
+const DEEP_SCAN_EXACT_PATTERN = new RegExp(`^${DEEP_SCAN_PREFIX}(?:\s+for me)?(?:\s+please)?[.!?]*$`, "i");
+const DEEP_SCAN_WITH_FOLLOW_UP_PATTERN = new RegExp(
+  `^${DEEP_SCAN_PREFIX}(?:\\s+for me)?(?:\\s+please)?(?:\\s*(?:,|and then|then|and)\\s+)(.+)$`,
+  "i"
+);
 
 function buildMessage(role: Message["role"], content: string): Message {
   return {
@@ -57,18 +66,25 @@ function trimMessages(messages: Message[]): Message[] {
   return [first, ...tail];
 }
 
-function isDeepScanCommand(text: string): boolean {
-  const normalized = text.trim().toLowerCase();
-  return [
-    "scan this page",
-    "scan this",
-    "scan page",
-    "read this page",
-    "read this",
-    "read the page",
-    "look at this",
-    "analyze this page"
-  ].some((command) => normalized.includes(command));
+function parseDeepScanCommand(text: string): { followUpText: string | null; shouldScan: boolean } {
+  const normalized = text.trim().replace(/\s+/g, " ");
+  if (!normalized) {
+    return { followUpText: null, shouldScan: false };
+  }
+
+  const followUpMatch = normalized.match(DEEP_SCAN_WITH_FOLLOW_UP_PATTERN);
+  if (followUpMatch) {
+    const followUpText = followUpMatch[1]?.trim() ?? "";
+    return {
+      followUpText: followUpText.length > 0 ? followUpText : null,
+      shouldScan: true
+    };
+  }
+
+  return {
+    followUpText: null,
+    shouldScan: DEEP_SCAN_EXACT_PATTERN.test(normalized)
+  };
 }
 
 function cleanSpeechText(text: string): string {
@@ -127,7 +143,9 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
   const [error, setError] = useState<string | null>(null);
   const [initialized, setInitialized] = useState<boolean>(false);
   const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [lastScanAt, setLastScanAt] = useState<number | null>(null);
   const [quotaExhausted, setQuotaExhausted] = useState<boolean>(false);
+  const [scanSummary, setScanSummary] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const messagesRef = useRef<Message[]>([]);
@@ -205,18 +223,8 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
     [speak]
   );
 
-  const submitText = useCallback(
-    async (rawText: string): Promise<void> => {
-      const trimmed = rawText.trim();
-      if (!trimmed) {
-        return;
-      }
-
-      if (isDeepScanCommand(trimmed)) {
-        await scanPage();
-        return;
-      }
-
+  const sendStudentTurn = useCallback(
+    async (trimmed: string): Promise<void> => {
       if (trimmed.split(/\s+/).length < MIN_WORDS) {
         setError("Say a little more so I have enough context to help.");
         return;
@@ -308,10 +316,10 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
     [baseInterrupt, captureFrame, createAbortSignal, exam, speak, speakProgressively]
   );
 
-  const scanPage = useCallback(async (): Promise<void> => {
+  const runDeepScan = useCallback(async (): Promise<boolean> => {
     const frame = captureFrame();
     if (!frame || isScanning || quotaExhausted) {
-      return;
+      return false;
     }
 
     setIsScanning(true);
@@ -328,30 +336,61 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       if (!response.ok) {
         if (response.status === 429) {
           setQuotaExhausted(true);
+          setScanSummary("Deep scan paused because OCR quota is exhausted.");
           setError("OCR quota exhausted. Wait for reset or use a fresh API key.");
-          return;
+          return false;
         }
 
         const errorText = await response.text();
         setError(errorText || `OCR error: ${response.status}`);
-        return;
+        return false;
       }
 
       const payload = (await response.json()) as { text?: string };
       const nextText = payload.text?.trim() ?? "";
       if (!nextText) {
+        setScanSummary("Deep scan finished, but the page text was still too unclear.");
         setError("I could not read enough from the page. Try adjusting the camera.");
-        return;
+        return false;
       }
 
+      setLastScanAt(Date.now());
       setPageContext(nextText);
+      setScanSummary("Deep scan ready. I will use this page text in follow-up questions.");
+      return true;
     } catch (cause) {
       const nextError = cause instanceof Error ? cause.message : String(cause);
       setError(nextError);
+      return false;
     } finally {
       setIsScanning(false);
     }
   }, [captureFrame, isScanning, quotaExhausted]);
+
+  const submitText = useCallback(
+    async (rawText: string): Promise<void> => {
+      const trimmed = rawText.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      const scanCommand = parseDeepScanCommand(trimmed);
+      if (scanCommand.shouldScan) {
+        const scanSucceeded = await runDeepScan();
+        if (scanSucceeded && scanCommand.followUpText) {
+          await sendStudentTurn(scanCommand.followUpText);
+        }
+        return;
+      }
+
+      await sendStudentTurn(trimmed);
+    },
+    [runDeepScan, sendStudentTurn]
+  );
+
+  const scanPage = useCallback(async (): Promise<void> => {
+    await runDeepScan();
+  }, [runDeepScan]);
 
   const interrupt = useCallback(() => {
     baseInterrupt();
@@ -365,11 +404,13 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       initialized,
       interrupt,
       isScanning,
+      lastScanAt,
       messages,
       microphoneAvailable: isSupported,
       pageContext,
       quotaExhausted,
       scanPage,
+      scanSummary,
       startListening,
       status,
       stopListening,
@@ -383,10 +424,12 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       interrupt,
       isScanning,
       isSupported,
+      lastScanAt,
       messages,
       pageContext,
       quotaExhausted,
       scanPage,
+      scanSummary,
       startListening,
       status,
       stopListening,
