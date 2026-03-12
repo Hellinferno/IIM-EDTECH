@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { extractTextFromFrame, QuotaExhaustedError } from "@/lib/gemini";
-import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
+import { extractTextFromFrame, QuotaExhaustedError, RateLimitedError } from "@/lib/gemini";
 
 interface OCRRequestBody {
   image?: unknown;
@@ -10,11 +9,6 @@ export async function POST(request: Request): Promise<Response> {
   const { userId } = await auth();
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const rl = rateLimit(rateLimitKey(userId, "ocr"), { maxRequests: 30, windowMs: 60_000 });
-  if (!rl.success) {
-    return rateLimitResponse(rl.resetMs);
   }
 
   let payload: OCRRequestBody;
@@ -38,10 +32,29 @@ export async function POST(request: Request): Promise<Response> {
         { status: 429 }
       );
     }
-    const msg = error instanceof Error ? error.message : String(error);
-    if (msg.includes("429") || msg.includes("quota")) {
+    if (error instanceof RateLimitedError) {
       return Response.json(
-        { error: "quota_exhausted", message: "API rate limit reached. Please try again in a moment." },
+        {
+          error: "rate_limited",
+          message: error.message,
+          retryAfterSeconds: error.retryAfterSeconds ?? 10
+        },
+        {
+          status: 429,
+          headers: error.retryAfterSeconds ? { "Retry-After": String(error.retryAfterSeconds) } : undefined
+        }
+      );
+    }
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes("429") || msg.includes("Too Many Requests")) {
+      return Response.json(
+        { error: "rate_limited", message: "OCR service is busy. Please try again in a moment.", retryAfterSeconds: 10 },
+        { status: 429 }
+      );
+    }
+    if (msg.includes("quota")) {
+      return Response.json(
+        { error: "quota_exhausted", message: "API quota exhausted. Please wait for reset or use a new API key." },
         { status: 429 }
       );
     }

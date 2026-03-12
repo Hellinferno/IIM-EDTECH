@@ -34,6 +34,16 @@ export class QuotaExhaustedError extends Error {
   }
 }
 
+export class RateLimitedError extends Error {
+  retryAfterSeconds?: number;
+
+  constructor(detail?: string, retryAfterSeconds?: number) {
+    super(detail ?? "Gemini API is temporarily rate limited. Please retry shortly.");
+    this.name = "RateLimitedError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
 function createGenAI(): GoogleGenerativeAI {
   const rawKey = requiredEnv("GEMINI_API_KEY");
   return new GoogleGenerativeAI(rawKey.trim());
@@ -65,6 +75,22 @@ function isQuotaError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const msg = error.message;
   return msg.includes("429") || msg.includes("quota") || msg.includes("Too Many Requests");
+}
+
+function isQuotaExhaustedError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const msg = error.message.toLowerCase();
+  return msg.includes("limit: 0") || msg.includes("quota exhausted") || msg.includes("quota exceeded");
+}
+
+function extractRetryAfterSeconds(error: unknown): number | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const match = error.message.match(/retry_delay\s*{\s*seconds:\s*(\d+)/i);
+  if (!match) {
+    return undefined;
+  }
+  const seconds = Number(match[1]);
+  return Number.isFinite(seconds) ? seconds : undefined;
 }
 
 /** Sleep for given ms. */
@@ -127,6 +153,9 @@ export async function extractTextFromFrame(base64: string): Promise<string> {
     "Extract all visible text from this image. Reproduce math expressions in LaTeX (e.g. $x^2 + 3x = 0$). Return nothing else."
   ];
 
+  let sawTransientRateLimit = false;
+  let lastRetryAfterSeconds: number | undefined;
+
   // Try each model in priority order; fall back on quota errors.
   for (const modelName of MODEL_PRIORITY) {
     try {
@@ -135,11 +164,22 @@ export async function extractTextFromFrame(base64: string): Promise<string> {
       return result.response.text().trim();
     } catch (error) {
       if (isQuotaError(error)) {
+        if (!isQuotaExhaustedError(error)) {
+          sawTransientRateLimit = true;
+          lastRetryAfterSeconds = extractRetryAfterSeconds(error) ?? lastRetryAfterSeconds;
+        }
         console.warn(`Model ${modelName} quota hit, trying next fallback...`);
         continue;
       }
       throw error;
     }
+  }
+
+  if (sawTransientRateLimit) {
+    throw new RateLimitedError(
+      "Gemini OCR is temporarily rate limited. Please retry in a few seconds.",
+      lastRetryAfterSeconds
+    );
   }
 
   throw new QuotaExhaustedError("all models", "All Gemini models have hit their quota limits. Please wait for quota reset or use a new API key.");

@@ -43,6 +43,7 @@ const JPEG_QUALITY = 0.72;
 const MAX_CAPTURE_WIDTH = 960;
 const MAX_CAPTURE_HEIGHT = 720;
 const MAX_SCAN_MEMORY_PAGES = 4;
+const SAME_PAGE_SIMILARITY_THRESHOLD = 0.985;
 
 const DEEP_SCAN_PREFIX = String.raw`(?:can you\s+|could you\s+|would you\s+|please\s+)?(?:scan|read|analy[sz]e|look at)\s+(?:this|the)\s+(?:page|sheet|notebook|problem|question)`;
 const DEEP_SCAN_EXACT_PATTERN = new RegExp(`^${DEEP_SCAN_PREFIX}(?:\s+for me)?(?:\s+please)?[.!?]*$`, "i");
@@ -76,6 +77,54 @@ function buildPageContext(scanHistory: ScanMemoryEntry[]): string {
   return scanHistory
     .map((entry, index) => `[Scanned page ${index + 1}] ${entry.text}`)
     .join("\n\n");
+}
+
+function loadImageFromBase64(base64: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Failed to decode frame image"));
+    image.src = base64;
+  });
+}
+
+async function hashFrame(base64: string): Promise<string> {
+  const image = await loadImageFromBase64(base64);
+  const canvas = document.createElement("canvas");
+  const size = 16;
+  canvas.width = size;
+  canvas.height = size;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return "";
+  }
+
+  context.drawImage(image, 0, 0, size, size);
+  const pixels = context.getImageData(0, 0, size, size).data;
+  const grayValues: string[] = [];
+
+  for (let index = 0; index < pixels.length; index += 4) {
+    const gray = Math.round((pixels[index] * 0.3 + pixels[index + 1] * 0.59 + pixels[index + 2] * 0.11) / 4) * 4;
+    grayValues.push(gray.toString(16).padStart(2, "0"));
+  }
+
+  return grayValues.join("");
+}
+
+function similarity(a: string, b: string): number {
+  if (!a || !b || a.length !== b.length) {
+    return 0;
+  }
+
+  let same = 0;
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] === b[index]) {
+      same += 1;
+    }
+  }
+
+  return same / a.length;
 }
 
 function trimMessages(messages: Message[]): Message[] {
@@ -175,6 +224,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const messagesRef = useRef<Message[]>([]);
+  const lastScanHashRef = useRef<string>("");
   const scanHistoryRef = useRef<ScanMemoryEntry[]>([]);
   const pageContextRef = useRef<string>("");
   const statusRef = useRef<AgentStatus>("idle");
@@ -352,6 +402,22 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       return false;
     }
 
+    let currentHash = "";
+
+    try {
+      currentHash = await hashFrame(frame.base64);
+      const samePageAlreadyScanned =
+        scanHistoryRef.current.length > 0 && similarity(lastScanHashRef.current, currentHash) >= SAME_PAGE_SIMILARITY_THRESHOLD;
+
+      if (samePageAlreadyScanned) {
+        setInitialized(true);
+        setScanSummary("This page already matches your latest deep scan. Ask your question or move to a new page.");
+        return true;
+      }
+    } catch (cause) {
+      console.warn("Deep scan dedupe failed, continuing with OCR request:", cause);
+    }
+
     setIsScanning(true);
     setError(null);
     setInitialized(true);
@@ -365,9 +431,22 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
 
       if (!response.ok) {
         if (response.status === 429) {
-          setQuotaExhausted(true);
-          setScanSummary("Deep scan paused because OCR quota is exhausted.");
-          setError("OCR quota exhausted. Wait for reset or use a fresh API key.");
+          const payload = (await response.json().catch(() => ({}))) as {
+            error?: string;
+            message?: string;
+            retryAfterSeconds?: number;
+          };
+
+          if (payload.error === "quota_exhausted") {
+            setQuotaExhausted(true);
+            setScanSummary("Deep scan paused because OCR quota is exhausted.");
+            setError(payload.message ?? "OCR quota exhausted. Wait for reset or use a fresh API key.");
+            return false;
+          }
+
+          const retrySuffix = payload.retryAfterSeconds ? ` Retry in about ${payload.retryAfterSeconds} seconds.` : "";
+          setScanSummary(`OCR is busy right now.${retrySuffix}`);
+          setError((payload.message ?? "OCR service is temporarily rate limited.") + retrySuffix);
           return false;
         }
 
@@ -394,6 +473,9 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       scanHistoryRef.current = nextHistory;
       setScanHistory(nextHistory);
       setLastScanAt(scannedAt);
+      if (currentHash) {
+        lastScanHashRef.current = currentHash;
+      }
       setScanSummary(
         nextHistory.length === 1
           ? "Deep scan ready. I will use this page text in follow-up questions."

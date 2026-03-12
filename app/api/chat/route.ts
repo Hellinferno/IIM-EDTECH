@@ -4,7 +4,6 @@ import { SEND_IMAGE_SYSTEM_PROMPT } from "@/lib/prompts/send-image";
 import { buildVoiceAgentPrompt } from "@/lib/prompts/voice-agent";
 import { isValidMessageList, sseResponse } from "@/lib/api";
 import { streamChat, QuotaExhaustedError } from "@/lib/gemini";
-import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 import type { AppMode, ImageInput, Message } from "@/types";
 import type { ExamType } from "@/types/exam";
 
@@ -90,11 +89,6 @@ export async function POST(request: Request): Promise<Response> {
   const { userId } = await auth();
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const rl = rateLimit(rateLimitKey(userId, "chat"), { maxRequests: 20, windowMs: 60_000 });
-  if (!rl.success) {
-    return rateLimitResponse(rl.resetMs);
   }
 
   let payload: ChatRequestBody;
