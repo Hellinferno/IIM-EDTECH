@@ -28,7 +28,7 @@ export async function POST(request: Request): Promise<Response> {
   } catch (error) {
     if (error instanceof QuotaExhaustedError) {
       return Response.json(
-        { error: "quota_exhausted", message: "API quota exhausted. Please wait for reset or use a new API key." },
+        { error: "quota_exhausted", message: "API quota exhausted. If you updated the key, please RESTART THE SERVER." },
         { status: 429 }
       );
     }
@@ -54,7 +54,7 @@ export async function POST(request: Request): Promise<Response> {
     }
     if (msg.includes("quota")) {
       return Response.json(
-        { error: "quota_exhausted", message: "API quota exhausted. Please wait for reset or use a new API key." },
+        { error: "quota_exhausted", message: "API quota exhausted. If you updated the key, please RESTART THE SERVER." },
         { status: 429 }
       );
     }

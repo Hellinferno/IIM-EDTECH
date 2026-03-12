@@ -25,12 +25,13 @@ const MODEL_PRIORITY = [
   "gemini-2.0-flash",
   "gemini-2.0-flash-lite",
   "gemini-1.5-flash-latest",
+  "gemini-1.5-pro-latest",
 ] as const;
 
 /** Custom error class for quota exhaustion so callers can distinguish it. */
 export class QuotaExhaustedError extends Error {
   constructor(model: string, detail?: string) {
-    super(`Gemini API quota exhausted for ${model}. ${detail ?? "Please wait or use a new API key."}`);
+    super(`Gemini API quota exhausted for ${model}. ${detail ?? "Please wait, use a new API key, and RESTART THE SERVER."}`);
     this.name = "QuotaExhaustedError";
   }
 }
@@ -191,7 +192,7 @@ export async function extractTextFromFrame(base64: string): Promise<string> {
     );
   }
 
-  throw new QuotaExhaustedError("all models", "All Gemini models have hit their quota limits. Please wait for quota reset or use a new API key.");
+  throw new QuotaExhaustedError("all models", "All Gemini models have hit their quota limits. Please wait for quota reset, or use a new API key and RESTART THE SERVER.");
 }
 
 function toGeminiRole(role: Message["role"]): "user" | "model" {
@@ -274,5 +275,5 @@ export async function* streamChat(
     );
   }
 
-  throw new QuotaExhaustedError("all models", "All Gemini models have hit their quota limits. Please wait for quota reset or use a new API key.");
+  throw new QuotaExhaustedError("all models", "All Gemini models have hit their quota limits. Please wait for quota reset, or use a new API key and RESTART THE SERVER.");
 }
