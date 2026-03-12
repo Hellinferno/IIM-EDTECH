@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { extractTextFromFrame, QuotaExhaustedError, RateLimitedError } from "@/lib/gemini";
+import { ConfigurationError, extractTextFromFrame, QuotaExhaustedError, RateLimitedError } from "@/lib/gemini";
 
 interface OCRRequestBody {
   image?: unknown;
@@ -26,6 +26,12 @@ export async function POST(request: Request): Promise<Response> {
     const text = await extractTextFromFrame(payload.image);
     return Response.json({ text: text.trim() });
   } catch (error) {
+    if (error instanceof ConfigurationError) {
+      return Response.json(
+        { error: "configuration_error", message: "Gemini request configuration or API key permissions are invalid. Restart the app server after changing the key, then try again." },
+        { status: 400 }
+      );
+    }
     if (error instanceof QuotaExhaustedError) {
       return Response.json(
         { error: "quota_exhausted", message: error.message },

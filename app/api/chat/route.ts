@@ -1,9 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
+import { isValidMessageList, sseResponse } from "@/lib/api";
+import { ConfigurationError, QuotaExhaustedError, RateLimitedError, streamChat } from "@/lib/gemini";
 import { buildLiveOCRAgentPrompt, LIVE_OCR_SYSTEM_PROMPT } from "@/lib/prompts/live-ocr";
 import { SEND_IMAGE_SYSTEM_PROMPT } from "@/lib/prompts/send-image";
 import { buildVoiceAgentPrompt } from "@/lib/prompts/voice-agent";
-import { isValidMessageList, sseResponse } from "@/lib/api";
-import { streamChat, QuotaExhaustedError } from "@/lib/gemini";
 import type { AppMode, ImageInput, Message } from "@/types";
 import type { ExamType } from "@/types/exam";
 
@@ -35,10 +35,12 @@ function normalizeImage(input: unknown): ImageInput | undefined {
   if (!input || typeof input !== "object") {
     return undefined;
   }
+
   const candidate = input as Partial<ImageInput>;
   if (typeof candidate.base64 !== "string" || typeof candidate.mimeType !== "string") {
     return undefined;
   }
+
   return {
     base64: candidate.base64,
     mimeType: candidate.mimeType
@@ -49,6 +51,7 @@ function enrichLiveOCR(messages: Message[], ocrText: string): Message[] {
   if (messages.length === 0) {
     return messages;
   }
+
   const latest = messages[messages.length - 1];
   if (latest.role !== "user") {
     return messages;
@@ -58,6 +61,7 @@ function enrichLiveOCR(messages: Message[], ocrText: string): Message[] {
     ...latest,
     content: `[OCR] ${ocrText}\n${latest.content}`
   };
+
   return [...messages.slice(0, -1), enrichedLastMessage];
 }
 
@@ -75,7 +79,6 @@ function trimMessagesForCost(messages: Message[]): Message[] {
   return [first, ...tail];
 }
 
-/** Strip metadata (id, createdAt) — Gemini only needs role + content. */
 function stripMetadata(messages: Message[]): Message[] {
   return messages.map(({ role, content }) => ({
     id: "",
@@ -94,9 +97,9 @@ export async function POST(request: Request): Promise<Response> {
   let payload: ChatRequestBody;
   try {
     payload = (await request.json()) as ChatRequestBody;
-  } catch (e: any) {
-    console.error("Chat API JSON Error:", e);
-    return Response.json({ error: "Invalid JSON body", details: String(e) }, { status: 400 });
+  } catch (error) {
+    console.error("Chat API JSON Error:", error);
+    return Response.json({ error: "Invalid JSON body", details: String(error) }, { status: 400 });
   }
 
   if (!isValidMessageList(payload.messages)) {
@@ -128,7 +131,7 @@ export async function POST(request: Request): Promise<Response> {
       return Response.json({ error: "Invalid exam for voice agent mode" }, { status: 400 });
     }
     systemPrompt = buildVoiceAgentPrompt(exam);
-    maxTokens = 300; // shorter for voice
+    maxTokens = 300;
   } else if (mode === "live_ocr_agent") {
     const exam = resolveExam(payload.exam);
     if (!exam) {
@@ -147,24 +150,39 @@ export async function POST(request: Request): Promise<Response> {
   return sseResponse(async (controller) => {
     const encoder = new TextEncoder();
     let hasTokens = false;
+
     try {
       for await (const token of streamChat(baseMessages, systemPrompt, image, maxTokens)) {
         hasTokens = true;
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(token)}\n\n`));
       }
+
       if (!hasTokens) {
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify("I couldn't generate a response. Please try again.")}\n\n`)
         );
       }
     } catch (error) {
-      if (error instanceof QuotaExhaustedError || (error instanceof Error && (error.message.includes("429") || error.message.includes("quota")))) {
+      if (error instanceof QuotaExhaustedError) {
         controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify("⚠️ API quota exhausted. The free tier daily limit has been reached. Please wait for it to reset (resets daily) or generate a new API key from a new Google Cloud project at aistudio.google.com.")}\n\n`)
+          encoder.encode(`data: ${JSON.stringify("API quota exhausted. The free tier daily limit has been reached. Wait for the quota reset or use a different Google AI Studio project key.")}\n\n`)
         );
-      } else {
-        throw error;
+        return;
       }
+
+      if (error instanceof RateLimitedError) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(error.message)}\n\n`));
+        return;
+      }
+
+      if (error instanceof ConfigurationError) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify("Gemini request configuration is invalid. Restart the app server and try again. If it still fails, recheck the Gemini API key permissions.")}\n\n`)
+        );
+        return;
+      }
+
+      throw error;
     }
   });
 }

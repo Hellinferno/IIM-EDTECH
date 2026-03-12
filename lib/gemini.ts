@@ -22,12 +22,12 @@ const MAX_CONTEXT_MESSAGES = 8;
 
 /** Models to try in order — if one hits quota, fall back to the next. */
 const MODEL_PRIORITY = [
-  "gemini-2.0-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
+  "gemini-flash-lite-latest",
+  "gemini-flash-latest",
   "gemini-2.0-flash-lite",
-  "gemini-1.5-flash",
-  "gemini-1.5-flash-latest",
-  "gemini-1.5-pro",
-  "gemini-1.5-pro-latest",
+  "gemini-2.0-flash",
 ] as const;
 
 /** Custom error class for quota exhaustion so callers can distinguish it. */
@@ -45,6 +45,13 @@ export class RateLimitedError extends Error {
     super(detail ?? "Gemini API is temporarily rate limited. Please retry shortly.");
     this.name = "RateLimitedError";
     this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+export class ConfigurationError extends Error {
+  constructor(detail?: string) {
+    super(detail ?? "Gemini API request is invalid or the API key is misconfigured.");
+    this.name = "ConfigurationError";
   }
 }
 
@@ -66,10 +73,7 @@ function getModel(
       temperature: 0.4
     },
     ...(systemInstruction && {
-      systemInstruction: {
-        role: "user" as const,
-        parts: [{ text: systemInstruction }]
-      }
+      systemInstruction
     })
   });
 }
@@ -79,6 +83,20 @@ function isQuotaError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const msg = error.message;
   return msg.includes("429") || msg.includes("quota") || msg.includes("Too Many Requests");
+}
+
+function isConfigurationError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const msg = error.message;
+  return (
+    msg.includes("400") ||
+    msg.includes("Bad Request") ||
+    msg.includes("INVALID_ARGUMENT") ||
+    msg.includes("API key not valid") ||
+    msg.includes("API_KEY_INVALID") ||
+    msg.includes("PERMISSION_DENIED") ||
+    msg.includes("system_instruction")
+  );
 }
 
 function isQuotaExhaustedError(error: unknown): boolean {
@@ -178,6 +196,9 @@ export async function extractTextFromFrame(base64: string): Promise<string> {
         console.warn(`Model ${modelName} quota hit (${(error as Error).message}), trying next fallback...`);
         continue;
       }
+      if (isConfigurationError(error)) {
+        throw new ConfigurationError((error as Error).message);
+      }
       // If model not found (404), log and skip to next model
       if ((error as Error).message.includes("404") || (error as Error).message.includes("not found")) {
         console.warn(`Model ${modelName} not found, skipping fallback...`);
@@ -263,6 +284,9 @@ export async function* streamChat(
         }
         console.warn(`Model ${modelName} quota hit (${(error as Error).message}), trying next fallback...`);
         continue;
+      }
+      if (isConfigurationError(error)) {
+        throw new ConfigurationError((error as Error).message);
       }
       // If model not found (404), log and skip to next model
       if ((error as Error).message.includes("404") || (error as Error).message.includes("not found")) {

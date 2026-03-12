@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { SEND_IMAGE_SYSTEM_PROMPT } from "@/lib/prompts/send-image";
 import { sseResponse } from "@/lib/api";
-import { streamChat } from "@/lib/gemini";
+import { ConfigurationError, QuotaExhaustedError, RateLimitedError, streamChat } from "@/lib/gemini";
 import { uploadTemporaryImage } from "@/lib/supabase";
 import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 import type { Message } from "@/types";
@@ -75,8 +75,31 @@ export async function POST(request: Request): Promise<Response> {
   console.log("Starting streamChat!");
   return sseResponse(async (controller) => {
     const encoder = new TextEncoder();
-    for await (const token of streamChat(messages, SEND_IMAGE_SYSTEM_PROMPT, image)) {
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify(token)}\n\n`));
+    try {
+      for await (const token of streamChat(messages, SEND_IMAGE_SYSTEM_PROMPT, image)) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(token)}\n\n`));
+      }
+    } catch (error) {
+      if (error instanceof QuotaExhaustedError) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify("API quota exhausted. The free tier daily limit has been reached. Wait for the quota reset or use a different Google AI Studio project key.")}\n\n`)
+        );
+        return;
+      }
+
+      if (error instanceof RateLimitedError) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(error.message)}\n\n`));
+        return;
+      }
+
+      if (error instanceof ConfigurationError) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify("Gemini request configuration is invalid. Restart the app server and try again. If it still fails, recheck the Gemini API key permissions.")}\n\n`)
+        );
+        return;
+      }
+
+      throw error;
     }
   });
 }
