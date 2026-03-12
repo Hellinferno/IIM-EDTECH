@@ -17,8 +17,8 @@ function stripDataUrlPrefix(input: string): string {
   return input.slice(commaIndex + 1);
 }
 
-/** Max conversation turns (user+assistant pairs) sent as history to save tokens. */
-const MAX_HISTORY_TURNS = 6;
+/** Max number of recent messages retained, plus the first context seed message. */
+const MAX_CONTEXT_MESSAGES = 8;
 
 /** Models to try in order — if one hits quota, fall back to the next. */
 const MODEL_PRIORITY = [
@@ -101,12 +101,18 @@ async function withRetry<T>(
   throw lastError;
 }
 
-/** Keep only the last N user+assistant turns to cap input tokens. */
-function trimHistory(messages: Message[], maxTurns: number): Message[] {
-  if (messages.length <= maxTurns * 2) {
+/** Keep first context message plus recent turns to cap input tokens. */
+function trimHistory(messages: Message[], maxMessages: number): Message[] {
+  if (messages.length <= maxMessages) {
     return messages;
   }
-  return messages.slice(-maxTurns * 2);
+
+  const first = messages[0];
+  const tail = messages.slice(-maxMessages);
+  if (tail[0]?.id === first.id) {
+    return tail;
+  }
+  return [first, ...tail];
 }
 
 export async function extractTextFromFrame(base64: string): Promise<string> {
@@ -153,7 +159,7 @@ export async function* streamChat(
     return;
   }
 
-  const trimmed = trimHistory(messages, MAX_HISTORY_TURNS);
+  const trimmed = trimHistory(messages, MAX_CONTEXT_MESSAGES);
 
   const historyParts = trimmed.slice(0, -1).map((message) => ({
     role: toGeminiRole(message.role),

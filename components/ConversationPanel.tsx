@@ -21,7 +21,28 @@ interface ConversationPanelProps {
   mode: AppMode;
   ocrText?: string;
   image?: ImageInput;
+  onRequestSnapshot?: () => Promise<void>;
   className?: string;
+}
+
+const CONTEXT_WINDOW = 8;
+
+function trimMessagesForCost(messages: Message[]): Message[] {
+  if (messages.length <= CONTEXT_WINDOW) {
+    return messages;
+  }
+
+  const first = messages[0];
+  const tail = messages.slice(-CONTEXT_WINDOW);
+  if (tail[0]?.id === first.id) {
+    return tail;
+  }
+  return [first, ...tail];
+}
+
+function isSnapshotCommand(text: string): boolean {
+  const normalized = text.toLowerCase().trim();
+  return normalized.includes("look at this") || normalized.includes("scan this") || normalized.includes("read this");
 }
 
 export function ConversationPanel({
@@ -31,6 +52,7 @@ export function ConversationPanel({
   mode,
   ocrText,
   image,
+  onRequestSnapshot,
   className = ""
 }: ConversationPanelProps): JSX.Element {
   const [status, setStatus] = useState<ConversationStatus>("idle");
@@ -43,9 +65,17 @@ export function ConversationPanel({
   const { speak, stop: stopSpeaking, isSpeaking } = useVoiceOutput();
   const { isSupported: voiceSupported, startListening, stopListening, isListening } = useVoiceInput({
     onTranscript: (text) => {
-      if (text.trim()) {
-        void handleSend(text.trim());
+      const transcript = text.trim();
+      if (!transcript) {
+        return;
       }
+
+      if (mode === "live_ocr" && onRequestSnapshot && isSnapshotCommand(transcript)) {
+        void onRequestSnapshot();
+        return;
+      }
+
+      void handleSend(transcript);
     }
   });
   const { interrupt, createAbortSignal } = useInterrupt({
@@ -80,6 +110,7 @@ export function ConversationPanel({
       interrupt();
 
       const updatedMessages = onAddUserMessage(text.trim());
+      const messagesForApi = trimMessagesForCost(updatedMessages);
       setStatus("thinking");
 
       try {
@@ -88,7 +119,7 @@ export function ConversationPanel({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            messages: updatedMessages,
+            messages: messagesForApi,
             mode,
             ocrText: ocrText || undefined,
             image: image || undefined

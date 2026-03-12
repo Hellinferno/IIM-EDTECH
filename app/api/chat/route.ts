@@ -1,21 +1,33 @@
 import { auth } from "@clerk/nextjs/server";
 import { LIVE_OCR_SYSTEM_PROMPT } from "@/lib/prompts/live-ocr";
 import { SEND_IMAGE_SYSTEM_PROMPT } from "@/lib/prompts/send-image";
+import { buildVoiceAgentPrompt } from "@/lib/prompts/voice-agent";
 import { isValidMessageList, sseResponse } from "@/lib/api";
 import { streamChat, QuotaExhaustedError } from "@/lib/gemini";
 import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 import type { AppMode, ImageInput, Message } from "@/types";
+import type { ExamType } from "@/types/exam";
 
 interface ChatRequestBody {
   messages?: unknown;
   mode?: unknown;
   ocrText?: unknown;
   image?: unknown;
+  exam?: unknown;
 }
 
+const CONTEXT_WINDOW = 8;
+
 function resolveMode(mode: unknown): AppMode | null {
-  if (mode === "live_ocr" || mode === "send_image") {
+  if (mode === "live_ocr" || mode === "send_image" || mode === "voice_agent") {
     return mode;
+  }
+  return null;
+}
+
+function resolveExam(exam: unknown): ExamType | null {
+  if (exam && ["CAT", "GMAT", "NEET", "UPSC", "JEE"].includes(String(exam))) {
+    return exam as ExamType;
   }
   return null;
 }
@@ -48,6 +60,20 @@ function enrichLiveOCR(messages: Message[], ocrText: string): Message[] {
     content: `[OCR] ${ocrText}\n${latest.content}`
   };
   return [...messages.slice(0, -1), enrichedLastMessage];
+}
+
+function trimMessagesForCost(messages: Message[]): Message[] {
+  if (messages.length <= CONTEXT_WINDOW) {
+    return messages;
+  }
+
+  const first = messages[0];
+  const tail = messages.slice(-CONTEXT_WINDOW);
+  if (tail[0]?.id === first.id) {
+    return tail;
+  }
+
+  return [first, ...tail];
 }
 
 /** Strip metadata (id, createdAt) — Gemini only needs role + content. */
@@ -96,9 +122,26 @@ export async function POST(request: Request): Promise<Response> {
   const image = normalizeImage(payload.image);
   const enriched =
     mode === "live_ocr" && ocrText ? enrichLiveOCR(payload.messages, ocrText) : payload.messages;
-  const baseMessages = stripMetadata(enriched);
-  const systemPrompt = mode === "live_ocr" ? LIVE_OCR_SYSTEM_PROMPT : SEND_IMAGE_SYSTEM_PROMPT;
-  const maxTokens = mode === "live_ocr" ? 512 : 1024;
+  const trimmedMessages = trimMessagesForCost(enriched);
+  const baseMessages = stripMetadata(trimmedMessages);
+
+  let systemPrompt: string;
+  let maxTokens: number;
+
+  if (mode === "voice_agent") {
+    const exam = resolveExam(payload.exam);
+    if (!exam) {
+      return Response.json({ error: "Invalid exam for voice agent mode" }, { status: 400 });
+    }
+    systemPrompt = buildVoiceAgentPrompt(exam);
+    maxTokens = 300; // shorter for voice
+  } else if (mode === "live_ocr") {
+    systemPrompt = LIVE_OCR_SYSTEM_PROMPT;
+    maxTokens = 512;
+  } else {
+    systemPrompt = SEND_IMAGE_SYSTEM_PROMPT;
+    maxTokens = 1024;
+  }
 
   return sseResponse(async (controller) => {
     const encoder = new TextEncoder();

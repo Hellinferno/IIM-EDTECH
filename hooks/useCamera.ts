@@ -64,8 +64,15 @@ export function useCamera(): UseCameraResult {
         return null;
       }
 
-      const width = videoElement.videoWidth;
-      const height = videoElement.videoHeight;
+      const sourceWidth = videoElement.videoWidth;
+      const sourceHeight = videoElement.videoHeight;
+
+      const maxWidth = 800;
+      const maxHeight = 600;
+      const scale = Math.min(maxWidth / sourceWidth, maxHeight / sourceHeight, 1);
+      const width = Math.max(1, Math.round(sourceWidth * scale));
+      const height = Math.max(1, Math.round(sourceHeight * scale));
+
       canvasElement.width = width;
       canvasElement.height = height;
 
@@ -75,7 +82,7 @@ export function useCamera(): UseCameraResult {
       }
 
       context.drawImage(videoElement, 0, 0, width, height);
-      return canvasElement.toDataURL("image/jpeg", 0.6);
+      return canvasElement.toDataURL("image/jpeg", 0.75);
     },
     []
   );

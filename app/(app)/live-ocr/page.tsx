@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AppHeader } from "@/components/AppHeader";
 import { ConversationPanel } from "@/components/ConversationPanel";
@@ -18,7 +18,6 @@ function truncate(text: string, maxLength: number): string {
 export default function LiveOCRPage(): JSX.Element {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [bootstrappedFromOCR, setBootstrappedFromOCR] = useState<boolean>(false);
   const { messages, addUserMessage, addAssistantMessage, clearHistory } = useConversation();
 
   const { isActive, permissionError, noCameraAvailable, startCamera, stopCamera, captureFrame } =
@@ -28,11 +27,16 @@ export default function LiveOCRPage(): JSX.Element {
     return captureFrame(videoRef.current, canvasRef.current);
   }, [captureFrame]);
 
-  const { detectedText, quotaExhausted } = useOCR({
-    enabled: isActive && !bootstrappedFromOCR,
+  const { detectedText, isScanning, quotaExhausted, scanNow } = useOCR({
+    enabled: isActive,
     captureFrame: captureCurrentFrame,
-    intervalMs: 6000
+    autoScan: false,
+    intervalMs: 10000
   });
+
+  const handleSnapshot = useCallback(async (): Promise<void> => {
+    await scanNow();
+  }, [scanNow]);
 
   useEffect(() => {
     const currentVideoElement = videoRef.current;
@@ -41,16 +45,6 @@ export default function LiveOCRPage(): JSX.Element {
       stopCamera(currentVideoElement);
     };
   }, [startCamera, stopCamera]);
-
-  // When OCR detects text for the first time, bootstrap the conversation
-  useEffect(() => {
-    if (!detectedText || bootstrappedFromOCR) {
-      return;
-    }
-    setBootstrappedFromOCR(true);
-    // Add a user message to kick off the conversation
-    addUserMessage("Please guide me through this question.");
-  }, [bootstrappedFromOCR, detectedText, addUserMessage]);
 
   if (permissionError) {
     return (
@@ -82,12 +76,19 @@ export default function LiveOCRPage(): JSX.Element {
             className="absolute right-3 top-3 border border-background bg-foreground/70 px-3 py-1 text-sm text-background backdrop-blur"
             onClick={() => {
               stopCamera(videoRef.current);
-              setBootstrappedFromOCR(false);
               clearHistory();
             }}
             type="button"
           >
             End Session
+          </button>
+          <button
+            className="absolute left-3 top-3 border border-background bg-foreground/70 px-3 py-1 text-sm text-background backdrop-blur disabled:opacity-60"
+            disabled={isScanning || quotaExhausted}
+            onClick={() => void handleSnapshot()}
+            type="button"
+          >
+            {isScanning ? "Scanning..." : "Snapshot"}
           </button>
           {/* Snapshot blink animation */}
           <AnimatePresence>
@@ -110,7 +111,11 @@ export default function LiveOCRPage(): JSX.Element {
                 key={detectedText || "ocr-hint"}
                 transition={{ duration: 0.2, ease: "easeOut" }}
               >
-                {detectedText ? truncate(detectedText, 200) : quotaExhausted ? "⚠️ API quota exhausted — scanning paused. Please wait or use a new API key." : "Point camera at text to begin"}
+                {detectedText
+                  ? truncate(detectedText, 200)
+                  : quotaExhausted
+                    ? "API quota exhausted — scanning paused. Please wait or use a new API key."
+                    : "Say 'look at this' or tap Snapshot to scan once."}
               </motion.p>
             </AnimatePresence>
           </div>
@@ -124,6 +129,7 @@ export default function LiveOCRPage(): JSX.Element {
             onAddAssistantMessage={addAssistantMessage}
             mode="live_ocr"
             ocrText={detectedText}
+            onRequestSnapshot={handleSnapshot}
           />
         </section>
       </div>

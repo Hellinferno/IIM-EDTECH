@@ -1,13 +1,63 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Image from "next/image";
+import NextImage from "next/image";
 import { AppHeader } from "@/components/AppHeader";
 import { ConversationPanel } from "@/components/ConversationPanel";
 import { ChatThread } from "@/components/chat/ChatThread";
 import { ImageUpload } from "@/components/image-upload/ImageUpload";
 import { useConversation } from "@/hooks/useConversation";
 import { consumeSSE } from "@/lib/sse-client";
+
+const MAX_UPLOAD_WIDTH = 800;
+const MAX_UPLOAD_HEIGHT = 600;
+
+function loadImage(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new window.Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Unable to read selected image"));
+    };
+    img.src = objectUrl;
+  });
+}
+
+async function compressForGemini(file: File): Promise<File> {
+  const img = await loadImage(file);
+  const scale = Math.min(MAX_UPLOAD_WIDTH / img.width, MAX_UPLOAD_HEIGHT / img.height, 1);
+  const width = Math.max(1, Math.round(img.width * scale));
+  const height = Math.max(1, Math.round(img.height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return file;
+  }
+
+  ctx.drawImage(img, 0, 0, width, height);
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob((result) => resolve(result), "image/jpeg", 0.75)
+  );
+
+  if (!blob) {
+    return file;
+  }
+
+  const compressedName = file.name.replace(/\.[^.]+$/, "") + "-compressed.jpg";
+  return new File([blob], compressedName, {
+    type: "image/jpeg",
+    lastModified: Date.now()
+  });
+}
 
 export default function SendImagePage(): JSX.Element {
   const [file, setFile] = useState<File | null>(null);
@@ -42,8 +92,9 @@ export default function SendImagePage(): JSX.Element {
     clearHistory();
 
     try {
+      const compressedFile = await compressForGemini(file);
       const formData = new FormData();
-      formData.append("image", file);
+      formData.append("image", compressedFile);
 
       const response = await fetch("/api/image", {
         method: "POST",
@@ -94,7 +145,7 @@ export default function SendImagePage(): JSX.Element {
           {/* Image preview + controls */}
           <div className="flex flex-col gap-3 border border-border p-3">
             {previewUrl ? (
-              <Image
+              <NextImage
                 alt="Question preview"
                 className="max-h-64 w-full object-contain"
                 height={480}
