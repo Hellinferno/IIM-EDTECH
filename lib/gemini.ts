@@ -79,8 +79,9 @@ function isQuotaError(error: unknown): boolean {
 
 function isQuotaExhaustedError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
-  const msg = error.message.toLowerCase();
-  return msg.includes("limit: 0") || msg.includes("quota exhausted") || msg.includes("quota exceeded");
+  // Only treat as truly permanent if the API explicitly says limit is 0.
+  // All other quota/rate messages are treated as transient to avoid locking users out.
+  return error.message.includes("limit: 0");
 }
 
 function extractRetryAfterSeconds(error: unknown): number | undefined {

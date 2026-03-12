@@ -398,7 +398,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
 
   const runDeepScan = useCallback(async (): Promise<boolean> => {
     const frame = captureFrame();
-    if (!frame || isScanning || quotaExhausted) {
+    if (!frame || isScanning) {
       return false;
     }
 
@@ -437,16 +437,9 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
             retryAfterSeconds?: number;
           };
 
-          if (payload.error === "quota_exhausted") {
-            setQuotaExhausted(true);
-            setScanSummary("Deep scan paused because OCR quota is exhausted.");
-            setError(payload.message ?? "OCR quota exhausted. Wait for reset or use a fresh API key.");
-            return false;
-          }
-
-          const retrySuffix = payload.retryAfterSeconds ? ` Retry in about ${payload.retryAfterSeconds} seconds.` : "";
+          const retrySuffix = payload.retryAfterSeconds ? ` Retry in about ${payload.retryAfterSeconds} seconds.` : " Please try again in a moment.";
           setScanSummary(`OCR is busy right now.${retrySuffix}`);
-          setError((payload.message ?? "OCR service is temporarily rate limited.") + retrySuffix);
+          setError((payload.message ?? "OCR service is temporarily busy.") + retrySuffix);
           return false;
         }
 
@@ -489,7 +482,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
     } finally {
       setIsScanning(false);
     }
-  }, [captureFrame, isScanning, quotaExhausted]);
+  }, [captureFrame, isScanning]);
 
   const submitText = useCallback(
     async (rawText: string): Promise<void> => {
