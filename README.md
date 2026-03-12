@@ -1,103 +1,118 @@
-# ClarityAI Prototype v0.1
+# ClarityAI
 
-ClarityAI is a web-based AI learning companion prototype with two core modes:
+ClarityAI is a Next.js study assistant for exam prep. It combines camera-based page understanding, voice interaction, and step-by-step image solving behind authenticated routes.
 
-- `Live OCR`: camera feed -> OCR -> guided tutor chat (no direct answers).
-- `Send Image`: upload/take photo -> full step-by-step solution -> follow-up chat.
+## Product Modes
 
-This repository now includes both product documents and a working starter scaffold.
+- `Live OCR + Voice`
+  - Main route: `/live-ocr`
+  - Exam-aware tutoring for `CAT`, `GMAT`, `NEET`, `UPSC`, and `JEE`
+  - Camera stays on while the student talks or types
+  - Optional deep page scan stores OCR memory for the current session
+  - Assistant replies stream back token-by-token and can be spoken aloud
+- `Send Image`
+  - Main route: `/send-image`
+  - Upload a question image and receive a full worked solution
+  - Follow-up questions continue in a shared conversation panel
 
-## Source Documents
+## Current Route Map
 
-- `PRD.md`: product scope, user flows, success criteria
-- `TASKS.md`: implementation plan and phase breakdown
-- `ARCHITECTURE.md`: system architecture and data flow
-- `TECH_STACK.md`: technology decisions and free-tier strategy
-- `RULES.md`: behavior, UX, and engineering guardrails
-- `desgin.md`: implementation design notes used for this scaffold
-- `KNOWN_ISSUES.md`: current implementation gaps and pending validations
+- `/`
+  - Auth-gated landing page with the two primary mode cards
+- `/exam-select`
+  - Exam picker used before the live tutor flow
+- `/live-ocr`
+  - Main combined camera, OCR, and voice tutor experience
+- `/voice-agent`
+  - Compatibility route that now redirects into `/live-ocr`
+- `/send-image`
+  - Upload-first problem solving flow
+- `/sign-in`, `/sign-up`
+  - Clerk auth routes
 
-## Tech Stack
+## Stack
 
-- Next.js 14 (App Router) + TypeScript
+- Next.js 14 App Router
+- TypeScript
 - Tailwind CSS
-- Clerk Authentication
-- Supabase (Postgres + Storage)
-- Google Gemini API (`gemini-1.5-flash`) for OCR/vision/chat streaming
+- Clerk for authentication
+- Supabase for user records and temporary image storage
+- Google Gemini via `@google/generative-ai`
 
-## Implemented Scaffold
+## Gemini Integration
 
-1. App structure
-- Auth routes: `/sign-in`, `/sign-up`
-- App routes: `/`, `/live-ocr`, `/send-image`, `/exam-select`, `/voice-agent`
-- API routes: `/api/ocr`, `/api/chat`, `/api/image`, `/api/webhooks/clerk`
+The app now uses a live-supported fallback order in [`lib/gemini.ts`](./lib/gemini.ts):
 
-2. Core modules
-- Gemini client (`lib/gemini.ts`)
-- Prompts (`lib/prompts/live-ocr.ts`, `lib/prompts/send-image.ts`, `lib/prompts/voice-agent.ts`)
-- Supabase helper (`lib/supabase.ts`)
-- SSE helpers (`lib/api.ts`, `lib/sse-client.ts`)
-- Exam configuration (`types/exam.ts`)
+1. `gemini-2.5-flash-lite`
+2. `gemini-2.5-flash`
+3. `gemini-flash-lite-latest`
+4. `gemini-flash-latest`
+5. `gemini-2.0-flash-lite`
+6. `gemini-2.0-flash`
 
-3. Client hooks/components
-- `useCamera`, `useOCR`, `useChat`, `useVoiceAgent`
-- `useVoiceInput`, `useVoiceOutput`, `useInterrupt`
-- Chat UI primitives (`ChatThread`, `ChatInput`, etc.)
-- `ImageUpload` component
-- `ModeCards` (now includes Voice Agent option)
+Important notes:
 
-## Project Structure
+- The request wrapper now passes `systemInstruction` in the correct Gemini format.
+- Older `gemini-1.5-*` fallbacks were removed because they no longer resolve for `generateContent`.
+- If you change `GEMINI_API_KEY`, restart the Next.js dev server so the new environment value is picked up.
 
-```text
-app/
-  (auth)/
-    sign-in/page.tsx
-    sign-up/page.tsx
-  (app)/
-    page.tsx
-    live-ocr/page.tsx
-    send-image/page.tsx
-  api/
-    chat/route.ts
-    image/route.ts
-    ocr/route.ts
-  globals.css
-  layout.tsx
-components/
-  AppHeader.tsx
-  ModeCards.tsx
-  chat/
-  image-upload/
-hooks/
-  useCamera.ts
-  useChat.ts
-  useOCR.ts
-lib/
-  api.ts
-  gemini.ts
-  sse-client.ts
-  supabase.ts
-  prompts/
-types/
-  index.ts
-middleware.ts
-```
+## Key App Flows
 
-## Environment Setup
+### Live OCR + Voice
 
-Copy `.env.example` to `.env.local` and fill values:
+1. User signs in.
+2. User chooses an exam on `/exam-select`.
+3. `/live-ocr?exam=...` opens the camera and the conversation workspace.
+4. `useLiveOCRAgent` can:
+   - capture the current video frame
+   - trigger `/api/ocr` for deep scans
+   - send chat turns to `/api/chat` with exam, image, and OCR memory
+5. Gemini streams a reply back through SSE.
+6. The browser renders the text progressively and reads it aloud when voice output is enabled.
+
+### Send Image
+
+1. User uploads a file on `/send-image`.
+2. The image is compressed client-side before upload.
+3. `/api/image` validates the file, uploads a temporary copy to Supabase, and streams the first solution.
+4. Follow-up turns use `/api/chat` through the shared conversation panel.
+
+## API Routes
+
+- `/api/chat`
+  - Auth required
+  - Handles `live_ocr`, `live_ocr_agent`, `send_image`, and `voice_agent` modes
+  - Validates messages and exam selection
+  - Streams Gemini output as SSE
+- `/api/ocr`
+  - Auth required
+  - Accepts a base64 frame
+  - Returns extracted page text
+  - Distinguishes quota, rate-limit, and configuration failures
+- `/api/image`
+  - Auth required
+  - Accepts multipart image upload
+  - Streams the first step-by-step solution
+- `/api/webhooks/clerk`
+  - Syncs user lifecycle events into Supabase
+
+## Environment Variables
+
+Copy `.env.example` to `.env.local` and set:
 
 ```bash
 GEMINI_API_KEY=
+
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
 CLERK_SECRET_KEY=
 CLERK_WEBHOOK_SECRET=
+
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 ```
 
-## Local Run
+## Local Development
 
 ```bash
 npm install
@@ -106,9 +121,16 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+Recommended checks:
+
+```bash
+npm run typecheck
+npm run build
+```
+
 ## Supabase Minimum Setup
 
-Run this SQL in Supabase:
+Create the `users` table:
 
 ```sql
 CREATE TABLE users (
@@ -119,383 +141,33 @@ CREATE TABLE users (
 );
 ```
 
-Create a Storage bucket named `images` and set retention/cleanup to 1 hour for prototype behavior.
-
-Configure a Clerk webhook endpoint:
-
-- URL: `/api/webhooks/clerk`
-- Events: `user.created`, `user.updated`, `user.deleted`
-- Secret: set as `CLERK_WEBHOOK_SECRET` in `.env.local`
-
-## Rule-Critical Requirements
-
-- Live OCR mode must not provide direct answers.
-- OCR poll interval stays at 3000ms.
-- Every `/api/*` route requires authenticated user context.
-- Avoid logging image or message payload content.
-- Keep UI minimal and mobile-friendly.
-
-## Current Status
-
-- Docs baseline: complete
-- Core scaffold and feature parity build: complete
-- Cost optimization (frame diffing, compression, context trimming): complete
-- Voice Agent with exam-aware tutoring: complete ✅ **REFACTORED WITH IMPROVED ERROR HANDLING**
-- Dependency install + typecheck/lint/build: complete ✅ **ALL TYPES VALIDATED**
-- QA and prompt hardening: pending manual validation
-- Production deployment: pending
-
----
-
-## System Architecture & Code Quality
-
-### Voice Agent System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      Student Client (Browser)                   │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ┌──────────────────────┐                                        │
-│  │  /voice-agent Page   │ (useVoiceAgent hook)                   │
-│  │  - Mic button        │                                        │
-│  │  - Chat display      │                                        │
-│  │  - Status indicator  │                                        │
-│  │  - Error handling    │                                        │
-│  └──────────┬───────────┘                                        │
-│             │                                                     │
-│    ┌────────▼────────┐        ┌─────────────┐                   │
-│    │   Web Speech    │        │ speechSynth │                   │
-│    │   API (STT)     │        │   (TTS)     │                   │
-│    │                 │        │             │                   │
-│    │ en-IN language  │        │ Sentence-by │                   │
-│    │ continuous OFF  │        │ sentence    │                   │
-│    └────────┬────────┘        └─────────────┘                   │
-│             │                                                     │
-│             │ Transcript (text)                                  │
-│             ▼                                                     │
-│    ┌────────────────────────────┐                               │
-│    │  useVoiceAgent Hook         │                               │
-│    │  ────────────────────────   │                               │
-│    │  State:                     │                               │
-│    │  - messages[]               │                               │
-│    │  - status                   │                               │
-│    │  - transcript               │                               │
-│    │  - error                    │ ◄─── NEW: Error handling     │
-│    │  - microphoneAvailable      │ ◄─── NEW: Availability check │
-│    │                             │                               │
-│    │  sendMessage(text) ──────┐  │                               │
-│    │  - Input validation      │  │ ◄─── NEW: min 3 chars       │
-│    │  - API call with exam    │  │                               │
-│    │  - SSE parsing (NEW)     │  │ ◄─── FIX: Proper SSE parse  │
-│    │  - Sentence split (NEW)  │  │ ◄─── IMPROVED: Regex split  │
-│    │  - TTS playback          │  │                               │
-│    │  - Error recovery (NEW)  │  │ ◄─── FIX: Network errors    │
-│    │                          │  │                               │
-│    │  interrupt()             │  │ ◄─── FIX: All cleanup done  │
-│    └────────┬─────────────────┘  │                               │
-│             │                     │                               │
-└─────────────┼─────────────────────┼──────────────────────────────┘
-              │                     │
-              │ POST /api/chat      │ SSE response
-              ▼                     ▲
-┌─────────────────────────────────────────────────────────────────┐
-│                      Backend (Next.js API)                      │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  POST /api/chat                                                  │
-│  ┌────────────────────────────────────────────┐                 │
-│  │ Request: { messages, mode, exam, ... }    │                 │
-│  │                                             │                 │
-│  │ 1. Auth check (Clerk)                      │                 │
-│  │ 2. Rate limit check (20 req/min)          │                 │
-│  │ 3. Message validation                      │                 │
-│  │ 4. Mode resolution                         │                 │
-│  │ 5. Exam validation (if voice_agent)       │ ◄─── NEW: Check │
-│  │ 6. System prompt selection                 │                 │
-│  │    ├─ voice_agent → buildVoiceAgentPrompt() ◄─ DYNAMIC      │
-│  │    ├─ live_ocr → LIVE_OCR_SYSTEM_PROMPT                    │
-│  │    └─ send_image → SEND_IMAGE_SYSTEM_PROMPT               │
-│  │ 7. Message context trimming                │                 │
-│  │    ├─ first message (exam context)         │                 │
-│  │    └─ last 8 turns (cost control)         │                 │
-│  │ 8. Gemini API call (SSE stream)            │                 │
-│  │ 9. Response streaming to client            │                 │
-│  │                                             │                 │
-│  └────────────────────────────────────────────┘                 │
-│                                                                   │
-│  /lib/prompts/voice-agent.ts                                    │
-│  ┌────────────────────────────────────────────┐                 │
-│  │ buildVoiceAgentPrompt(exam)                │                 │
-│  │                                             │                 │
-│  │ Returns: Single adaptive prompt template   │                 │
-│  │ Injects: Exam context + teaching rules    │                 │
-│  │ Max response: 300 tokens                   │                 │
-│  │                                             │                 │
-│  │ Examples:                                   │                 │
-│  │ - NEET: "Always trace back to NCERT"     │                 │
-│  │ - CAT:  "What's the fastest method?"     │                 │
-│  │ - UPSC: "What's the other side?"         │                 │
-│  │ - JEE:  "Derive it, don't just apply"    │                 │
-│  │                                             │                 │
-│  └────────────────────────────────────────────┘                 │
-│                                                                   │
-└─────────────────────────────────────────────────────────────────┘
-              │
-              │ Vision API call
-              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   Google Gemini API                              │
-├─────────────────────────────────────────────────────────────────┤
-│  - Model: gemini-2.0-flash (primary)                             │
-│  - Fallback: gemini-2.0-flash-lite                              │
-│  - Stream: Yes (token-by-token)                                 │
-│  - Max output: 300 tokens (voice), 1024 (image)                │
-│  - Vision: Yes (base64 image support)                           │
-│  - Rate: 1,500 calls/day free tier                              │
-│                                                                   │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Key Improvements Applied
-
-#### ✅ Error Handling (BLOCKER FIXES)
-
-| Issue | Before | After | Impact |
-|-------|--------|-------|--------|
-| **Stale transcript race condition** | `transcript` captured after state change | Captured in ref immediately in `onresult` | Guarantees correct text sent |
-| **SSE stream parsing broken** | Concatenating raw chunks | `parseSSEData()` properly parses `data: {...}` | Fixes token accumulation |
-| **Unhandled API errors** | Only checking `AbortError` | Full error categorization (429, 401, 500, network) | Better UX with error messages |
-| **Welcome message never disappears** | `initialized` never set to true | Set to true on first message send | UI state properly managed |
-| **No microphone permission handling** | Silently fails | Returns `microphoneAvailable` flag | UI disables button with tooltip |
-
-#### ✅ Code Quality Improvements (MAJOR FIXES)
-
-1. **Input Validation**
-   - Added minimum 3-character check before API call
-   - User feedback for short inputs
-   - Silent failure removed
-
-2. **TTS Voice Selection**
-   - Now handles missing voices gracefully
-   - Falls back to system default
-   - No silent failures
-
-3. **Language Configuration**
-   - `en-IN` now configurable via hook params
-   - Supports fallback to `en-US`
-   - Hook signature: `useVoiceAgent({ exam, language })`
-
-4. **Sentence Splitting**
-   - Fixed regex: `/(?<=[.!?।])\s+/` (lookbehind split)
-   - Handles LaTeX cleanup (`$$...$$` → "equation")
-   - Removes markdown and HTML markup before TTS
-
-5. **Network Error Recovery**
-   - `TypeError` (network down) → "Network error" message
-   - HTTP 429 → "Rate limited" with wait guidance
-   - HTTP 401 → "Please sign in"
-   - HTTP 500+ → Generic error with status code
-   - Retry-safe: User can tap mic again
-
-6. **Cleanup Safety**
-   - `try/catch` on `recognition.abort()` (already stopped)
-   - `speechSynthesis.cancel()` before new session
-   - `AbortController` properly aborted on interrupt
-   - No event listener leaks
-
-#### ✅ Type Safety
-
-- Added new types to `UseVoiceAgentResult`:
-  - `microphoneAvailable: boolean`
-  - `error: string | null`
-- Proper `SpeechRecognitionEvent` interface
-- Exam validation function (`resolveExam`)
-- Chat request body type includes `exam` field
-
-### Voice Agent — Exam-Aware Tutoring Loop
-
-The Voice Agent mode turns the prototype into an **interactive conversation** between student and AI tutor, with the tutor's teaching style and difficulty adapted to the student's exam choice.
-
-### How It Works
-
-1. **Exam Selection** → Student picks CAT/GMAT/NEET/UPSC/JEE at `/exam-select`
-2. **System Prompt Injection** → AI receives exam-specific teaching rules (Socratic for all, but depth/pace varies by exam)
-3. **Voice Loop** → STT → Gemini reasoning → TTS reading response (sentence-by-sentence)
-4. **Interruption** → Student can stop mid-sentence anytime via button
-5. **Context Window** → Keeps first message + last 8 turns to cap tokens
-
-### Exam-Specific Behavior
-
-| Exam | Opening | Key Behavior | Tone |
-|---|---|---|---|
-| **CAT** | "What are we working on — Quant, DILR, or Verbal?" | After solving: "What's the fastest alternate method?" | Speed-focused, elimination mindset |
-| **GMAT** | "Tell me what you're finding difficult and we'll work through reasoning." | Emphasizes logic patterns, not just calculation | Structured, reasoning-first |
-| **NEET** | "What chapter are you on — test concepts or work problems?" | Always traces back to NCERT. "Which chapter?" | Concept-heavy, retrieval-driven |
-| **UPSC** | "What topic do you want to explore today?" | "What is the other side of this argument?" | Multi-angle, synthesis-focused |
-| **JEE** | "Show me your attempt first. Let's understand why, not just how." | "Derive it, don't just apply." | Derivation-level rigor |
-
-### Implementation Files
-
-- **types/exam.ts** — Exam types, configs, opening lines
-- **lib/prompts/voice-agent.ts** — `buildVoiceAgentPrompt(exam)` — single adaptive prompt per exam
-- **hooks/useVoiceAgent.ts** — ⭐ **REFACTORED** — Complete voice loop: STT + streaming Gemini + TTS with error handling
-- **app/(app)/exam-select/page.tsx** — Exam picker (5 colorful cards)
-- **app/(app)/voice-agent/page.tsx** — ⭐ **REFACTORED** — Main voice agent UI with mic button + chat display + error messages
-- **components/ModeCards.tsx** — Updated with Voice Agent option
-
-### Usage
-
-```
-User selects "Voice Agent" from home
-   → Chooses exam at /exam-select
-   → Lands on /voice-agent?exam=NEET
-   → AI greets: "NEET is won by whoever knows their NCERT the deepest..."
-   → User taps mic and speaks a question
-   → STT converts to text
-   → /api/chat receives: { messages, mode: "voice_agent", exam: "NEET" }
-   → Server picks exam-specific prompt: buildVoiceAgentPrompt("NEET")
-   → Gemini streams response (max 300 tokens)
-   → TTS reads aloud sentence-by-sentence
-   → User can interrupt, ask follow-up, or start new topic
-   → If error: Shows user-friendly message, allows retry
-```
-
-### Cost for Voice Agent
-
-- **Per student per hour:** ~25–35 Gemini calls (with optimizations)
-- **Cost at paid tier:** ~₹0.50–1.00 per student/hour
-- **Free tier (1,500 calls/day):** Supports ~25–30 students in 2-hour sessions
-
-### Key Optimizations Already Applied
-
-1. ✅ Frame diffing (OCR; skips redundant scans)
-2. ✅ Image compression (800×600 JPEG 75%)
-3. ✅ Message context trimming (first message + last 8 turns)
-4. ✅ Short response cap (max 3 sentences for voice)
-5. ✅ Voice-specific system prompts (no markdown, no lists)
-6. ✅ Robust error handling (network, permissions, API errors)
-7. ✅ Proper SSE stream parsing (fixed token accumulation)
-8. ✅ Race condition fixes (ref-based transcript capture)
-
-## Next Steps
-
-### Phase 1: Manual QA and Validation
-
-1. **Set Up Environment**
-   - Configure real Clerk, Supabase, and Gemini keys in `.env.local`
-   - Verify Supabase users table is created
-   - Test Clerk authentication (sign-up/sign-in flow)
-
-2. **Voice Agent QA**
-   - Test mic permission grant/denial → Verify error messages show
-   - Test with different exams:
-     - **CAT:** Verify speed/elimination focus in responses
-     - **NEET:** Verify AI asks "Which chapter?"
-     - **UPSC:** Verify "What's the other side?" questions
-     - **JEE:** Verify "Show derivation" demands
-   - Test interruption (stop button during speaking)
-   - Test network error → Verify "Network error" message → Retry by tapping mic again
-   - Test rate limits (make 20+ rapid API calls)
-
-3. **Live OCR and Send Image QA**
-   - Verify frame diffing works (check for redundant OCR calls)
-   - Verify image compression (< 100KB per image)
-   - Verify message context trimming (check API logs for limited history)
-
-4. **API Error Handling**
-   - Test without Gemini key → Should show quota/auth error
-   - Test with rate limiting exhausted → Should show helpful message
-   - Test with network disconnected → Should show network error
-
-5. **Cross-Browser Testing**
-   - Chrome (desktop, mobile): STT/TTS should work
-   - Safari (desktop, iOS): Check Web Speech API support
-   - Edge, Firefox: Verify graceful degradation if not supported
-
-### Phase 2: Hardening & Performance
-
-1. Profile Gemini token usage across all three modes
-2. Optimize sentence splitting for Indian language support (Hinglish)
-3. Add logging/analytics (tokens, latency, error rates) to identify bottlenecks
-4. Review KNOWN_ISSUES.md and resolve all audit findings
-
-### Phase 3: Beta Launch
-
-1. Seed with 5–10 test users per exam
-2. Collect usage patterns and cost metrics
-3. Adjust token budgets based on real data
-4. Plan for scale: rate limiting, caching, background job indexing
-
-## Skills Required To Build skills.sh
-
-If you want to build a platform like [skills.sh](https://skills.sh/), these are the core skills you should have on the team.
-
-### Product and UX
-
-- Product discovery and roadmap planning
-- Information architecture for marketplace-style catalogs
-- Search UX and faceted filtering design
-- Developer-focused UX writing and documentation design
-- Community growth and curation workflows
-
-### Frontend Engineering
-
-- Next.js App Router architecture and SSR/ISR patterns
-- TypeScript for large-scale React applications
-- Tailwind CSS and component system design
-- Accessibility (WCAG 2.2), keyboard navigation, screen reader support
-- High-performance UI patterns (virtualized lists, incremental loading)
-
-### Backend and APIs
-
-- REST API design and versioning
-- PostgreSQL schema design (skills, versions, tags, installs, audits)
-- Caching strategies (Redis/in-memory), rate limiting, and abuse prevention
-- Authentication and authorization patterns (session/JWT, RBAC)
-- Background job processing (indexing, popularity scoring, audit refresh)
-
-### Search and Ranking
-
-- Full-text search fundamentals (Postgres FTS/Meilisearch/Elasticsearch)
-- Relevance ranking and result scoring
-- Trending and hotness algorithms (time-decay scoring)
-- Analytics instrumentation for click-through and install funnels
-
-### CLI and Developer Tooling
-
-- Node.js CLI development (`npx` install and command ergonomics)
-- Package publishing and version management (npm)
-- Agent integration patterns (Copilot, Cursor, Claude Code, etc.)
-- Configuration management and cross-platform shell compatibility
-
-### Quality and Security
-
-- Unit, integration, and end-to-end testing strategy
-- API contract and regression testing
-- Secrets management and supply-chain security
-- SAST/SCA scanning and dependency vulnerability remediation
-- Content moderation, trust, and abuse-report handling
-
-### DevOps and Platform
-
-- CI/CD pipelines with preview environments
-- Observability (logs, traces, metrics, SLO-based alerting)
-- CDN and edge caching strategy
-- Database migrations and rollback safety
-- Cost monitoring and performance tuning at scale
-
-### Recommended Agent Skills (from the skills ecosystem)
-
-- `frontend-design`
-- `web-design-guidelines`
-- `api-testing-patterns`
-- `code-review-quality`
-- `regression-testing`
-- `ghost-scan-code`
-- `ghost-scan-deps`
-- `ghost-scan-secrets`
-- `docker-deployment`
-- `find-skills`
-- `agent-browser`
-- `agent-workflow-builder_ai_toolkit`
+Create a Storage bucket named `images`.
+
+## Behavior Rules
+
+- `Live OCR` and `Live OCR + Voice` should guide, not hand over direct answers.
+- `Send Image` should produce complete step-by-step solutions.
+- API routes require authenticated user context.
+- Image and chat payloads should not be logged.
+- Session chat history remains in memory for the prototype.
+
+## Verification Snapshot
+
+Recently verified in this repo:
+
+- TypeScript check passes
+- Production build passes
+- `gemini-2.5-flash-lite` works with both text and image input
+- Current Gemini error handling separates:
+  - quota exhaustion
+  - transient rate limiting
+  - invalid request or key configuration
+
+## Related Docs
+
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md)
+- [`desgin.md`](./desgin.md)
+- [`PRD.md`](./PRD.md)
+- [`TASKS.md`](./TASKS.md)
+- [`RULES.md`](./RULES.md)
+- [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md)
