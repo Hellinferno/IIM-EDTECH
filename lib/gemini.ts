@@ -272,13 +272,12 @@ export async function* streamChat(
       throw error;
     }
   }
-`Gemini Chat is temporarily rate limited (Key: ...${key.slice(-4)}). Please retry in a few seconds.`,
+  if (sawTransientRateLimit) {
+    throw new RateLimitedError(
+      `Gemini Chat is temporarily rate limited (Key: ...${key.slice(-4)}). Please retry in a few seconds.`,
       lastRetryAfterSeconds
     );
   }
 
-  throw new QuotaExhaustedError("all models", `Key ending in ...${key.slice(-4)} exhausted all models. Check usage in Google AI Studio or restart server if key was updated.`
-  }
-
-  throw new QuotaExhaustedError("all models", "All Gemini models have hit their quota limits. Please wait for quota reset, or use a new API key and RESTART THE SERVER.");
+  throw new QuotaExhaustedError("all models", `Key ending in ...${key.slice(-4)} exhausted all models. Check usage in Google AI Studio or restart server if key was updated.`);
 }
