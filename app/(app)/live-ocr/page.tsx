@@ -65,6 +65,7 @@ export default function LiveOCRPage(): JSX.Element {
     pageContext,
     quotaExhausted,
     scanPage,
+    scanHistory,
     scanSummary,
     startListening,
     status,
@@ -98,6 +99,7 @@ export default function LiveOCRPage(): JSX.Element {
   );
   const hasDeepScan = pageContext.length > 0;
   const formattedScanTime = formatScanTime(lastScanAt);
+  const latestScan = scanHistory[scanHistory.length - 1] ?? null;
 
   if (hasInvalidExam) {
     return (
@@ -248,12 +250,32 @@ export default function LiveOCRPage(): JSX.Element {
               <p className="mt-2 text-sm leading-6 text-white/85">
                 {scanSummary && !pageContext
                   ? scanSummary
-                  : pageContext
-                  ? truncate(pageContext, 180)
+                  : latestScan
+                  ? truncate(latestScan.text, 180)
                   : quotaExhausted
                     ? "OCR quota is exhausted, so deep page scans are paused for now."
                     : "Use Scan page when you want Clarity to read the whole sheet more carefully."}
               </p>
+              {scanHistory.length > 1 ? (
+                <div className="mt-3 border-t border-white/10 pt-3">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-200/75">
+                    {scanHistory.length} pages in memory
+                  </p>
+                  <div className="mt-2 flex max-h-28 flex-col gap-2 overflow-y-auto pr-1">
+                    {scanHistory
+                      .slice()
+                      .reverse()
+                      .map((entry, index) => (
+                        <div key={entry.id} className="border border-white/10 bg-white/5 px-2 py-2 text-xs text-white/80">
+                          <p className="uppercase tracking-[0.16em] text-white/45">
+                            Page {scanHistory.length - index} at {formatScanTime(entry.scannedAt)}
+                          </p>
+                          <p className="mt-1 leading-5">{truncate(entry.text, 120)}</p>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
