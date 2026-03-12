@@ -24,6 +24,7 @@ const MAX_CONTEXT_MESSAGES = 8;
 const MODEL_PRIORITY = [
   "gemini-2.0-flash",
   "gemini-2.0-flash-lite",
+  "gemini-1.5-flash",
 ] as const;
 
 /** Custom error class for quota exhaustion so callers can distinguish it. */
@@ -143,6 +144,8 @@ function trimHistory(messages: Message[], maxMessages: number): Message[] {
 }
 
 export async function extractTextFromFrame(base64: string): Promise<string> {
+  const key = process.env.GEMINI_API_KEY || "";
+  console.log(`[Gemini] OCR Request | Key: ...${key.slice(-4)}`);
   const cleanBase64 = stripDataUrlPrefix(base64);
   const content = [
     {
@@ -169,7 +172,7 @@ export async function extractTextFromFrame(base64: string): Promise<string> {
           sawTransientRateLimit = true;
           lastRetryAfterSeconds = extractRetryAfterSeconds(error) ?? lastRetryAfterSeconds;
         }
-        console.warn(`Model ${modelName} quota hit, trying next fallback...`);
+        console.warn(`Model ${modelName} quota hit (${(error as Error).message}), trying next fallback...`);
         continue;
       }
       throw error;
@@ -220,6 +223,9 @@ export async function* streamChat(
   }
   parts.push({ text: latest.content });
 
+  let sawTransientRateLimit = false;
+  let lastRetryAfterSeconds: number | undefined;
+
   // Try each model in priority order; fall back on quota errors.
   for (const modelName of MODEL_PRIORITY) {
     try {
@@ -240,11 +246,22 @@ export async function* streamChat(
       return; // Success — exit the model loop.
     } catch (error) {
       if (isQuotaError(error)) {
-        console.warn(`Model ${modelName} quota hit, trying next fallback...`);
+        if (!isQuotaExhaustedError(error)) {
+          sawTransientRateLimit = true;
+          lastRetryAfterSeconds = extractRetryAfterSeconds(error) ?? lastRetryAfterSeconds;
+        }
+        console.warn(`Model ${modelName} quota hit (${(error as Error).message}), trying next fallback...`);
         continue;
       }
       throw error;
     }
+  }
+
+  if (sawTransientRateLimit) {
+    throw new RateLimitedError(
+      "Gemini Chat is temporarily rate limited. Please retry in a few seconds.",
+      lastRetryAfterSeconds
+    );
   }
 
   throw new QuotaExhaustedError("all models", "All Gemini models have hit their quota limits. Please wait for quota reset or use a new API key.");
