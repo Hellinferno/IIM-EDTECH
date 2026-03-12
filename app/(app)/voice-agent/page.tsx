@@ -10,13 +10,25 @@ import { TypingIndicator } from "@/components/chat/TypingIndicator";
 import { useVoiceAgent } from "@/hooks/useVoiceAgent";
 import { AGENT_OPENERS, type ExamType } from "@/types/exam";
 
+const VALID_EXAMS: readonly ExamType[] = ["CAT", "GMAT", "NEET", "UPSC", "JEE"];
+
 export default function VoiceAgentPage(): JSX.Element {
   const router = useRouter();
   const searchParams = useSearchParams();
   const examParam = searchParams.get("exam") as ExamType | null;
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const isValidExam = examParam !== null && VALID_EXAMS.includes(examParam);
+  const exam = isValidExam ? examParam : "CAT";
 
-  if (!examParam || !["CAT", "GMAT", "NEET", "UPSC", "JEE"].includes(examParam)) {
+  const { messages, status, transcript, startListening, interrupt, initialized, microphoneAvailable, error } = useVoiceAgent({
+    exam
+  });
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, status]);
+
+  if (!isValidExam) {
     return (
       <main className="flex min-h-screen items-center justify-center">
         <div className="text-center">
@@ -31,15 +43,6 @@ export default function VoiceAgentPage(): JSX.Element {
       </main>
     );
   }
-
-  const exam = examParam as ExamType;
-  const { messages, status, transcript, startListening, interrupt, initialized, microphoneAvailable, error } = useVoiceAgent({
-    exam
-  });
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, status]);
 
   const statusIndicators: Record<typeof status, { color: string; label: string }> = {
     idle: { color: "text-foreground/50", label: "Ready" },
@@ -60,7 +63,7 @@ export default function VoiceAgentPage(): JSX.Element {
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          Your browser doesn't support voice input. Please use Chrome, Safari, or Edge.
+          Your browser does not support voice input. Please use Chrome, Safari, or Edge.
         </motion.div>
       )}
 
