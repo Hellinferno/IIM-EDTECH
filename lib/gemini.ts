@@ -24,7 +24,7 @@ const MAX_CONTEXT_MESSAGES = 8;
 const MODEL_PRIORITY = [
   "gemini-2.0-flash",
   "gemini-2.0-flash-lite",
-  "gemini-1.5-flash",
+  "gemini-1.5-flash-latest",
 ] as const;
 
 /** Custom error class for quota exhaustion so callers can distinguish it. */
@@ -175,6 +175,11 @@ export async function extractTextFromFrame(base64: string): Promise<string> {
         console.warn(`Model ${modelName} quota hit (${(error as Error).message}), trying next fallback...`);
         continue;
       }
+      // If model not found (404), log and skip to next model
+      if ((error as Error).message.includes("404") || (error as Error).message.includes("not found")) {
+        console.warn(`Model ${modelName} not found, skipping fallback...`);
+        continue;
+      }
       throw error;
     }
   }
@@ -251,6 +256,11 @@ export async function* streamChat(
           lastRetryAfterSeconds = extractRetryAfterSeconds(error) ?? lastRetryAfterSeconds;
         }
         console.warn(`Model ${modelName} quota hit (${(error as Error).message}), trying next fallback...`);
+        continue;
+      }
+      // If model not found (404), log and skip to next model
+      if ((error as Error).message.includes("404") || (error as Error).message.includes("not found")) {
+        console.warn(`Model ${modelName} not found, skipping fallback...`);
         continue;
       }
       throw error;
