@@ -5,6 +5,8 @@ import { useInterrupt } from "@/hooks/useInterrupt";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { consumeSSE } from "@/lib/sse-client";
+import { buildAdaptiveLiveOCRPrompt } from "@/lib/prompts/live-ocr";
+import { createSessionTracker, updateSession, type SessionTracker } from "@/lib/utils/session-tracker";
 import type { ImageInput, Message } from "@/types";
 import type { ExamType } from "@/types/exam";
 
@@ -224,6 +226,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const messagesRef = useRef<Message[]>([]);
+  const sessionRef = useRef<SessionTracker>(createSessionTracker());
   const lastScanHashRef = useRef<string>("");
   const scanHistoryRef = useRef<ScanMemoryEntry[]>([]);
   const pageContextRef = useRef<string>("");
@@ -321,6 +324,12 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       setMessages(nextMessages);
       setStatus("thinking");
 
+      const session = sessionRef.current;
+      const adaptivePrompt = buildAdaptiveLiveOCRPrompt(exam, {
+        stuckCount: session.conceptMap[session.currentConcept]?.stuckCount ?? 0,
+        currentConcept: session.currentConcept
+      });
+
       try {
         const response = await fetch("/api/chat", {
           method: "POST",
@@ -331,7 +340,8 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
             image: captureFrame() ?? undefined,
             messages: trimMessages(nextMessages),
             mode: "live_ocr_agent",
-            ocrText: pageContextRef.current || undefined
+            ocrText: pageContextRef.current || undefined,
+            systemPrompt: adaptivePrompt
           })
         });
 
@@ -377,6 +387,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
           const assistantMessage = buildMessage("assistant", fullText.trim());
           messagesRef.current = [...messagesRef.current, assistantMessage];
           setMessages(messagesRef.current);
+          updateSession(sessionRef.current, trimmed, fullText.trim());
         }
 
         setStreamingText("");
